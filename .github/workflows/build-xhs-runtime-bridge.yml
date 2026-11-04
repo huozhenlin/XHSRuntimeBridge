@@ -46,9 +46,36 @@ jobs:
           DYLIB="$(find ios/XHSRuntimeBridge/.theos -type f -name 'XHSRuntimeBridge.dylib' | head -n 1)"
           test -n "$DYLIB"
           cp "$DYLIB" artifacts/XHSRuntimeBridge.dylib
+          FRAMEWORK="artifacts/XHSRuntimeBridge.framework"
+          mkdir -p "$FRAMEWORK"
+          cp "$DYLIB" "$FRAMEWORK/XHSRuntimeBridge"
+          cat > "$FRAMEWORK/Info.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDevelopmentRegion</key><string>en</string>
+            <key>CFBundleExecutable</key><string>XHSRuntimeBridge</string>
+            <key>CFBundleIdentifier</key><string>com.huozhenlin.XHSRuntimeBridge</string>
+            <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+            <key>CFBundlePackageType</key><string>FMWK</string>
+            <key>CFBundleShortVersionString</key><string>0.1.0</string>
+            <key>CFBundleVersion</key><string>${{ github.sha }}</string>
+            <key>CFBundleSupportedPlatforms</key><array><string>iPhoneOS</string></array>
+            <key>MinimumOSVersion</key><string>15.0</string>
+          </dict>
+          </plist>
+          EOF
+          (
+            cd artifacts
+            ditto -c -k --sequesterRsrc --keepParent \
+              XHSRuntimeBridge.framework \
+              XHSRuntimeBridge.framework.zip
+          )
 
       - uses: actions/upload-artifact@v4
         with:
           name: XHSRuntimeBridge
-          path: artifacts/XHSRuntimeBridge.dylib
+          path: artifacts/
           if-no-files-found: error
