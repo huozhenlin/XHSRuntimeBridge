@@ -219,6 +219,20 @@ static NSDictionary *XRBLoadConfiguration(void) {
         self.endpoint.absoluteString ?: @"<local-only>",
         self.localLogURL.path
     );
+
+    NSDictionary *startupFields = @{
+        @"push_enabled": @(self.enabled),
+        @"endpoint_configured": @(self.endpoint != nil),
+        @"token_configured": @(self.token.length > 0)
+    };
+    [self appendEvent:@"bridge_started" fields:startupFields];
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)),
+        dispatch_get_main_queue(),
+        ^{
+            [self appendEvent:@"bridge_started_retry" fields:startupFields];
+        }
+    );
 }
 
 - (BOOL)saveEndpoint:(NSString *)endpoint
@@ -271,7 +285,12 @@ static NSDictionary *XRBLoadConfiguration(void) {
 }
 
 - (void)appendEvent:(NSString *)event fields:(NSDictionary *)fields {
-    if (!self.enabled || event.length == 0) return;
+    BOOL isStartupDiagnostic =
+        [event isEqualToString:@"bridge_started"] ||
+        [event isEqualToString:@"bridge_started_retry"];
+    if ((!self.enabled && !isStartupDiagnostic) || event.length == 0) {
+        return;
+    }
 
     dispatch_async(self.queue, ^{
         NSMutableDictionary *payload = [NSMutableDictionary dictionary];
