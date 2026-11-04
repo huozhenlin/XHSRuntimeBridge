@@ -171,11 +171,28 @@ static UIViewController *XRBTopController(UIViewController *controller) {
             handler:^(__unused UIAlertAction *action) {
                 NSString *endpoint = alert.textFields[0].text ?: @"";
                 NSString *token = alert.textFields[1].text ?: @"";
-                XRBSaveSettings(endpoint, token, YES);
-                XRBLogEvent(@"settings_updated", @{
-                    @"endpoint_configured": @(endpoint.length > 0),
-                    @"token_configured": @(token.length > 0)
-                });
+                BOOL saved = XRBSaveSettings(endpoint, token, YES);
+                if (saved) {
+                    XRBLogEvent(@"settings_updated", @{
+                        @"endpoint_configured": @(endpoint.length > 0),
+                        @"token_configured": @(token.length > 0)
+                    });
+                } else {
+                    UIAlertController *error = [
+                        UIAlertController
+                        alertControllerWithTitle:@"配置无效"
+                        message:@"请输入类似 http://172.18.177.3:8901/events 的地址"
+                        preferredStyle:UIAlertControllerStyleAlert
+                    ];
+                    [error addAction:[
+                        UIAlertAction actionWithTitle:@"知道了"
+                        style:UIAlertActionStyleDefault
+                        handler:nil
+                    ]];
+                    [XRBTopController(root) presentViewController:error
+                                                         animated:YES
+                                                       completion:nil];
+                }
             }
         ]];
         [XRBTopController(root) presentViewController:alert

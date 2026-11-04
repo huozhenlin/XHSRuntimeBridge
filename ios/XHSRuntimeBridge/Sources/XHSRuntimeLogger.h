@@ -13,7 +13,7 @@ BOOL XRBIsCollectorRequest(NSURLRequest *request);
 
 /// The in-app settings UI reads and writes these values through NSUserDefaults.
 NSDictionary<NSString *, id> *XRBCurrentSettings(void);
-void XRBSaveSettings(
+BOOL XRBSaveSettings(
     NSString * _Nullable endpoint,
     NSString * _Nullable token,
     BOOL enabled

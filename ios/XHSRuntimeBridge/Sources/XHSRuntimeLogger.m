@@ -5,6 +5,8 @@
 static NSString *const XRBMarkerHeader = @"X-XHS-Runtime-Logger";
 static NSString *const XRBDefaultLogDirectory = @"XHSRuntimeBridge";
 static NSString *const XRBDefaultLogFile = @"events.ndjson";
+static NSString *const XRBDefaultCollectorURL =
+    @"http://172.18.177.3:8901/events";
 static const NSUInteger XRBMaximumEventBytes = 512 * 1024;
 static NSString *const XRBEndpointPreference = @"XRBCollectorEndpoint";
 static NSString *const XRBTokenPreference = @"XRBCollectorToken";
@@ -108,6 +110,9 @@ static NSDictionary *XRBLoadConfiguration(void) {
     if (token) configuration[@"token"] = token;
     if (includeBody) configuration[@"include_response_body"] = includeBody;
     if (maximumBytes) configuration[@"maximum_response_bytes"] = maximumBytes;
+    if (!configuration[@"endpoint"]) {
+        configuration[@"endpoint"] = XRBDefaultCollectorURL;
+    }
 
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     NSString *storedEndpoint =
@@ -216,18 +221,26 @@ static NSDictionary *XRBLoadConfiguration(void) {
     );
 }
 
-- (void)saveEndpoint:(NSString *)endpoint
-               token:(NSString *)token
-             enabled:(BOOL)enabled {
+- (BOOL)saveEndpoint:(NSString *)endpoint
+                token:(NSString *)token
+              enabled:(BOOL)enabled {
     NSString *trimmedEndpoint = [
         endpoint stringByTrimmingCharactersInSet:
             NSCharacterSet.whitespaceAndNewlineCharacterSet
     ];
+    if (trimmedEndpoint.length > 0 &&
+        ![trimmedEndpoint containsString:@"://"]) {
+        trimmedEndpoint = [@"http://" stringByAppendingString:trimmedEndpoint];
+    }
+    NSURL *candidateURL = [NSURL URLWithString:trimmedEndpoint];
+    if (candidateURL.path.length == 0) {
+        trimmedEndpoint = [trimmedEndpoint stringByAppendingString:@"/events"];
+    }
     NSURL *URL = [NSURL URLWithString:trimmedEndpoint];
     if (trimmedEndpoint.length > 0 &&
         (!URL.scheme.length || !URL.host.length)) {
         os_log_error(XRBSystemLog(), "settings rejected: invalid endpoint");
-        return;
+        return NO;
     }
 
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -246,6 +259,7 @@ static NSDictionary *XRBLoadConfiguration(void) {
         URL.absoluteString ?: @"<none>",
         enabled
     );
+    return YES;
 }
 
 - (NSDictionary<NSString *, id> *)settings {
@@ -367,6 +381,8 @@ NSDictionary<NSString *, id> *XRBCurrentSettings(void) {
     return [[XRBLogger shared] settings];
 }
 
-void XRBSaveSettings(NSString *endpoint, NSString *token, BOOL enabled) {
-    [[XRBLogger shared] saveEndpoint:endpoint token:token enabled:enabled];
+BOOL XRBSaveSettings(NSString *endpoint, NSString *token, BOOL enabled) {
+    return [[XRBLogger shared] saveEndpoint:endpoint
+                                      token:token
+                                    enabled:enabled];
 }

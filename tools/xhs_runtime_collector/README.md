@@ -9,7 +9,7 @@ Windows 上运行的结构化运行日志接收器。它只负责接收注入模
 $env:XHS_LOG_TOKEN = "请替换为随机长字符串"
 python .\tools\xhs_runtime_collector\collector.py `
   --host 0.0.0.0 `
-  --port 17321
+  --port 8901
 ```
 
 检查服务：

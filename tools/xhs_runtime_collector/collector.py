@@ -222,7 +222,7 @@ def parse_args() -> argparse.Namespace:
         description="Receive structured runtime events over HTTP."
     )
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=17321)
+    parser.add_argument("--port", type=int, default=8901)
     parser.add_argument(
         "--output",
         type=Path,
