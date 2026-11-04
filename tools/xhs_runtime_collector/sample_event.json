@@ -1,0 +1,12 @@
+{
+  "event": "note_detail_request",
+  "time": 1793760000000,
+  "class": "ExampleNoteDetailService",
+  "selector": "requestNoteDetail:completion:",
+  "thread": "main",
+  "data": {
+    "note_id_present": true,
+    "xsec_token_present": true,
+    "authorization": "this value will be redacted"
+  }
+}

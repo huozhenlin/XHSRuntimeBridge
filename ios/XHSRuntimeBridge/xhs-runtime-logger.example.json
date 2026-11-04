@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "endpoint": "http://192.168.1.100:17321/events",
+  "token": "replace-with-the-same-random-token-used-on-windows",
+  "include_response_body": false,
+  "maximum_response_bytes": 65536
+}

@@ -1,0 +1,40 @@
+name: Build XHSRuntimeBridge
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Theos
+        run: |
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$GITHUB_WORKSPACE/.theos-sdk"
+          brew install ldid xz
+
+      - name: Build dylib
+        working-directory: ios/XHSRuntimeBridge
+        env:
+          THEOS: ${{ github.workspace }}/.theos-sdk
+        run: |
+          make clean
+          make FINALPACKAGE=1
+          find .theos -name 'XHSRuntimeBridge.dylib' -print
+
+      - name: Collect artifact
+        run: |
+          mkdir -p artifacts
+          DYLIB="$(find ios/XHSRuntimeBridge/.theos -type f -name 'XHSRuntimeBridge.dylib' | head -n 1)"
+          test -n "$DYLIB"
+          cp "$DYLIB" artifacts/XHSRuntimeBridge.dylib
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XHSRuntimeBridge
+          path: artifacts/XHSRuntimeBridge.dylib
+          if-no-files-found: error
