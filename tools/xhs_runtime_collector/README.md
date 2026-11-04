@@ -28,9 +28,12 @@ Invoke-RestMethod http://127.0.0.1:17321/health
 
 ```http
 POST /events
-Authorization: Bearer <XHS_LOG_TOKEN>
+Authorization: Bearer <XHS_LOG_TOKEN>（可选）
 Content-Type: application/json
 ```
+
+如果 Windows 没有设置 `XHS_LOG_TOKEN`，接收器不会要求
+`Authorization`，手机端 Token 可以留空。
 
 单条事件：
 

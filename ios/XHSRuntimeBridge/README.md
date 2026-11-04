@@ -35,7 +35,7 @@ XHSRuntimeBridge.dylib
 
 ```text
 Collector URL: http://172.18.177.3:8901/events
-Collector Token: 与 Windows collector 相同的随机字符串
+Collector Token: 可选；Windows 未设置 XHS_LOG_TOKEN 时可以留空
 ```
 
 可以只填写 `172.18.177.3:8901`，插件会自动补全为：
@@ -47,6 +47,15 @@ http://172.18.177.3:8901/events
 点击“保存”后，地址和 Token 保存在小红书自身的 `NSUserDefaults` 中；
 下次启动无需再次填写。当前默认地址也是
 `http://172.18.177.3:8901/events`。
+
+按钮颜色和文字表示状态：
+
+```text
+绿色 ⚙ = 日志推送已开启
+红色 ⏸ = 日志推送已停止
+```
+
+进入设置后可以点击“开始推送”或“停止推送”切换状态。
 
 手机和电脑必须能够互访，Windows 防火墙需要允许 collector 端口入站。
 明文 HTTP 仅建议用于可信隔离局域网中的临时调试，长期使用建议 HTTPS。

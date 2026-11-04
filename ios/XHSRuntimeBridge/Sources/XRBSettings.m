@@ -5,6 +5,7 @@
 @interface XRBSettingsController : NSObject
 
 @property(nonatomic, strong) UIWindow *window;
+@property(nonatomic, strong) UIButton *button;
 
 + (instancetype)shared;
 - (void)installButton;
@@ -113,7 +114,19 @@ static UIViewController *XRBTopController(UIViewController *controller) {
         [overlay.rootViewController.view addSubview:button];
         overlay.hidden = NO;
         self.window = overlay;
+        self.button = button;
+        [self refreshButton];
     });
+}
+
+- (void)refreshButton {
+    NSDictionary *settings = XRBCurrentSettings();
+    BOOL enabled = [settings[@"enabled"] boolValue];
+    self.button.backgroundColor = enabled
+        ? [UIColor colorWithRed:0.08 green:0.42 blue:0.22 alpha:0.86]
+        : [UIColor colorWithRed:0.48 green:0.10 blue:0.10 alpha:0.86];
+    [self.button setTitle:enabled ? @"⚙" : @"⏸"
+                 forState:UIControlStateNormal];
 }
 
 - (void)showSettings:(id)sender {
@@ -128,9 +141,12 @@ static UIViewController *XRBTopController(UIViewController *controller) {
         if (!root) return;
 
         NSDictionary *settings = XRBCurrentSettings();
+        BOOL enabled = [settings[@"enabled"] boolValue];
         UIAlertController *alert = [
             UIAlertController alertControllerWithTitle:@"XHS Runtime Bridge"
-            message:@"配置 Windows 日志接收器"
+            message:enabled
+                ? @"日志推送：已开启\nToken 可以留空"
+                : @"日志推送：已停止\nToken 可以留空"
             preferredStyle:UIAlertControllerStyleAlert
         ];
         [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
@@ -142,7 +158,7 @@ static UIViewController *XRBTopController(UIViewController *controller) {
             field.text = settings[@"endpoint"];
         }];
         [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-            field.placeholder = @"Collector Token";
+            field.placeholder = @"Collector Token（可选）";
             field.secureTextEntry = YES;
             field.autocapitalizationType =
                 UITextAutocapitalizationTypeNone;
@@ -154,15 +170,20 @@ static UIViewController *XRBTopController(UIViewController *controller) {
             style:UIAlertActionStyleCancel
             handler:nil
         ]];
+        NSString *toggleTitle = enabled ? @"停止推送" : @"开始推送";
+        UIAlertActionStyle toggleStyle = enabled
+            ? UIAlertActionStyleDestructive
+            : UIAlertActionStyleDefault;
         [alert addAction:[
-            UIAlertAction actionWithTitle:@"停止推送"
-            style:UIAlertActionStyleDestructive
+            UIAlertAction actionWithTitle:toggleTitle
+            style:toggleStyle
             handler:^(__unused UIAlertAction *action) {
                 XRBSaveSettings(
                     settings[@"endpoint"],
                     settings[@"token"],
-                    NO
+                    !enabled
                 );
+                [self refreshButton];
             }
         ]];
         [alert addAction:[
@@ -177,6 +198,7 @@ static UIViewController *XRBTopController(UIViewController *controller) {
                         @"endpoint_configured": @(endpoint.length > 0),
                         @"token_configured": @(token.length > 0)
                     });
+                    [self refreshButton];
                 } else {
                     UIAlertController *error = [
                         UIAlertController
