@@ -12,6 +12,14 @@
 
 @end
 
+static NSString *const XRBOverlayWindowIdentifier =
+    @"com.xhs.runtimebridge.settings-overlay";
+
+static BOOL XRBIsBridgeOverlayWindow(UIWindow *window) {
+    return [window.accessibilityIdentifier
+        isEqualToString:XRBOverlayWindowIdentifier];
+}
+
 static UIWindow *XRBActiveWindow(void) {
     if (@available(iOS 13.0, *)) {
         for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
@@ -20,10 +28,13 @@ static UIWindow *XRBActiveWindow(void) {
                 continue;
             }
             for (UIWindow *window in ((UIWindowScene *)scene).windows) {
-                if (window.isKeyWindow) return window;
+                if (window.isKeyWindow && !XRBIsBridgeOverlayWindow(window)) {
+                    return window;
+                }
             }
-            UIWindow *first = ((UIWindowScene *)scene).windows.firstObject;
-            if (first) return first;
+            for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+                if (!XRBIsBridgeOverlayWindow(window)) return window;
+            }
         }
     }
     return nil;
@@ -82,6 +93,7 @@ static UIViewController *XRBTopController(UIViewController *controller) {
             overlay.windowScene = hostWindow.windowScene;
         }
         overlay.backgroundColor = UIColor.clearColor;
+        overlay.accessibilityIdentifier = XRBOverlayWindowIdentifier;
         overlay.windowLevel = UIWindowLevelAlert + 1;
         overlay.rootViewController = [UIViewController new];
         overlay.rootViewController.view.backgroundColor = UIColor.clearColor;
