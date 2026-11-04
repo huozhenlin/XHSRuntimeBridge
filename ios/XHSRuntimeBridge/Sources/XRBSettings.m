@@ -26,7 +26,7 @@ static UIWindow *XRBActiveWindow(void) {
             if (first) return first;
         }
     }
-    return UIApplication.sharedApplication.windows.firstObject;
+    return nil;
 }
 
 static UIViewController *XRBTopController(UIViewController *controller) {
