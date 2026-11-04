@@ -3,6 +3,8 @@
 
 #import "XHSRuntimeLogger.h"
 
+void XRBInstallSettingsUI(void);
+
 static NSString *const XRBNoteDetailPath = @"/api/sns/v10/note";
 
 static NSArray<NSString *> *XRBInterestingSelectors(void) {
@@ -220,6 +222,7 @@ static void XHSRuntimeBridgeInitialize(void) {
         });
 
         dispatch_async(dispatch_get_main_queue(), ^{
+            XRBInstallSettingsUI();
             XRBInstallURLSessionObservation();
             dispatch_async(
                 dispatch_get_global_queue(QOS_CLASS_UTILITY, 0),

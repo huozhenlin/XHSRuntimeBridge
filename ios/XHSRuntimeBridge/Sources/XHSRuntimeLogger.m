@@ -6,6 +6,9 @@ static NSString *const XRBMarkerHeader = @"X-XHS-Runtime-Logger";
 static NSString *const XRBDefaultLogDirectory = @"XHSRuntimeBridge";
 static NSString *const XRBDefaultLogFile = @"events.ndjson";
 static const NSUInteger XRBMaximumEventBytes = 512 * 1024;
+static NSString *const XRBEndpointPreference = @"XRBCollectorEndpoint";
+static NSString *const XRBTokenPreference = @"XRBCollectorToken";
+static NSString *const XRBEnabledPreference = @"XRBLoggerEnabled";
 
 @interface XRBLogger : NSObject
 
@@ -106,21 +109,16 @@ static NSDictionary *XRBLoadConfiguration(void) {
     if (includeBody) configuration[@"include_response_body"] = includeBody;
     if (maximumBytes) configuration[@"maximum_response_bytes"] = maximumBytes;
 
-    NSArray<NSURL *> *documents = [
-        NSFileManager.defaultManager
-        URLsForDirectory:NSDocumentDirectory
-        inDomains:NSUserDomainMask
-    ];
-    NSURL *fileURL = [[documents firstObject]
-        URLByAppendingPathComponent:@"xhs-runtime-logger.json"];
-    NSData *data = [NSData dataWithContentsOfURL:fileURL];
-    if (data.length > 0) {
-        NSDictionary *fileConfiguration = [
-            NSJSONSerialization JSONObjectWithData:data options:0 error:nil
-        ];
-        if ([fileConfiguration isKindOfClass:NSDictionary.class]) {
-            [configuration addEntriesFromDictionary:fileConfiguration];
-        }
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSString *storedEndpoint =
+        [defaults stringForKey:XRBEndpointPreference];
+    NSString *storedToken =
+        [defaults stringForKey:XRBTokenPreference];
+    if (storedEndpoint.length > 0) configuration[@"endpoint"] = storedEndpoint;
+    if (storedToken.length > 0) configuration[@"token"] = storedToken;
+    if ([defaults objectForKey:XRBEnabledPreference] != nil) {
+        configuration[@"enabled"] =
+            @([defaults boolForKey:XRBEnabledPreference]);
     }
     return configuration;
 }
@@ -216,6 +214,46 @@ static NSDictionary *XRBLoadConfiguration(void) {
         self.endpoint.absoluteString ?: @"<local-only>",
         self.localLogURL.path
     );
+}
+
+- (void)saveEndpoint:(NSString *)endpoint
+               token:(NSString *)token
+             enabled:(BOOL)enabled {
+    NSString *trimmedEndpoint = [
+        endpoint stringByTrimmingCharactersInSet:
+            NSCharacterSet.whitespaceAndNewlineCharacterSet
+    ];
+    NSURL *URL = [NSURL URLWithString:trimmedEndpoint];
+    if (trimmedEndpoint.length > 0 &&
+        (!URL.scheme.length || !URL.host.length)) {
+        os_log_error(XRBSystemLog(), "settings rejected: invalid endpoint");
+        return;
+    }
+
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    [defaults setObject:trimmedEndpoint forKey:XRBEndpointPreference];
+    [defaults setObject:token ?: @"" forKey:XRBTokenPreference];
+    [defaults setBool:enabled forKey:XRBEnabledPreference];
+
+    self.endpoint = URL;
+    self.token = token ?: @"";
+    self.enabled = enabled;
+    [defaults synchronize];
+
+    os_log_error(
+        XRBSystemLog(),
+        "settings saved endpoint=%{public}@ enabled=%{public}d",
+        URL.absoluteString ?: @"<none>",
+        enabled
+    );
+}
+
+- (NSDictionary<NSString *, id> *)settings {
+    return @{
+        @"endpoint": self.endpoint.absoluteString ?: @"",
+        @"token": self.token ?: @"",
+        @"enabled": @(self.enabled)
+    };
 }
 
 - (void)appendEvent:(NSString *)event fields:(NSDictionary *)fields {
@@ -323,4 +361,12 @@ void XRBLogEvent(NSString *event, NSDictionary<NSString *, id> *fields) {
 
 BOOL XRBIsCollectorRequest(NSURLRequest *request) {
     return [[request valueForHTTPHeaderField:XRBMarkerHeader] isEqualToString:@"1"];
+}
+
+NSDictionary<NSString *, id> *XRBCurrentSettings(void) {
+    return [[XRBLogger shared] settings];
+}
+
+void XRBSaveSettings(NSString *endpoint, NSString *token, BOOL enabled) {
+    [[XRBLogger shared] saveEndpoint:endpoint token:token enabled:enabled];
 }

@@ -26,43 +26,27 @@ XHSRuntimeBridge.dylib
 `NSAllowsArbitraryLoads=true`，所以这一版本不需要为了局域网日志连接修改
 `Info.plist`。
 
-## 配置接收地址
+## 在小红书内配置接收地址
 
-在小红书 App 的 Documents 根目录放置：
+不需要通过 Apple Devices/iTunes 写配置文件。dylib 加载后，小红书右下角会
+出现一个半透明的 `⚙` 按钮。
+
+点击后在 App 内填写：
 
 ```text
-xhs-runtime-logger.json
+Collector URL: http://192.168.1.100:17321/events
+Collector Token: 与 Windows collector 相同的随机字符串
 ```
 
-内容：
-
-```json
-{
-  "enabled": true,
-  "endpoint": "http://192.168.1.100:17321/events",
-  "token": "随机长字符串",
-  "include_response_body": false,
-  "maximum_response_bytes": 65536
-}
-```
-
-其中 `192.168.1.100` 必须替换为 Windows 电脑的局域网 IPv4。可以通过
-Windows Apple Devices/iTunes 的文件共享功能放入该文件；小红书 9.15.1
-已经启用了 `UIFileSharingEnabled`。
+其中 `192.168.1.100` 必须替换为 Windows 电脑的局域网 IPv4。点击“保存”
+后，地址和 Token 保存在小红书自身的 `NSUserDefaults` 中；下次启动无需
+再次填写。
 
 手机和电脑必须能够互访，Windows 防火墙需要允许 collector 端口入站。
 明文 HTTP 仅建议用于可信隔离局域网中的临时调试，长期使用建议 HTTPS。
 
-配置加载优先级：
-
-```text
-Documents/xhs-runtime-logger.json
-    高于
-Info.plist 中的 XHSRuntimeCollector* 可选配置
-```
-
-因此 TrollStore 注入场景完全可以只使用 Documents 配置，不改
-`Info.plist`。
+高级用法仍可在 `Info.plist` 中提供 `XHSRuntimeCollector*` 默认值，但
+TrollStore 注入场景不需要这么做。
 
 ## 构建
 

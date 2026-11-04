@@ -11,4 +11,12 @@ void XRBLogEvent(NSString *event, NSDictionary<NSString *, id> * _Nullable field
 /// Returns YES for the collector's own requests so network hooks can ignore them.
 BOOL XRBIsCollectorRequest(NSURLRequest *request);
 
+/// The in-app settings UI reads and writes these values through NSUserDefaults.
+NSDictionary<NSString *, id> *XRBCurrentSettings(void);
+void XRBSaveSettings(
+    NSString * _Nullable endpoint,
+    NSString * _Nullable token,
+    BOOL enabled
+);
+
 NS_ASSUME_NONNULL_END

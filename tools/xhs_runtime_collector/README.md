@@ -83,15 +83,9 @@ logger_error
 
 ## iOS/TrollStore 配置注意事项
 
-小红书 9.15.1 本身已经声明本地网络用途、允许对应网络访问并启用了文件
-共享，所以 TrollStore 注入场景不要求重新签名或修改 `Info.plist`。
+小红书 9.15.1 本身已经声明本地网络用途、允许对应网络访问，所以 TrollStore
+注入场景不要求重新签名或修改 `Info.plist`。注入 dylib 后，直接在小红书
+右下角的 `⚙` 按钮内配置电脑 IP 和 token；它们会存入 App 自身的
+`NSUserDefaults`。
 
-将 `ios/XHSRuntimeBridge/xhs-runtime-logger.example.json` 复制并改名为：
-
-```text
-xhs-runtime-logger.json
-```
-
-修改电脑 IP 和 token 后，通过 Windows Apple Devices/iTunes 文件共享放进
-小红书 Documents 根目录。更安全的长期方案是 HTTPS；明文 HTTP 仅建议
-用于可信隔离局域网中的短期调试。
+更安全的长期方案是 HTTPS；明文 HTTP 仅建议用于可信隔离局域网中的短期调试。
