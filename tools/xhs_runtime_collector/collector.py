@@ -208,8 +208,15 @@ class CollectorHandler(BaseHTTPRequestHandler):
         ]
         for event in stored:
             event_name = event.get("event", "unknown")
+            pid = event.get("pid", "")
+            class_name = event.get("class", "")
             selector = event.get("selector", "")
-            print(f"[event] {event_name} {selector}".rstrip())
+            details = " ".join(
+                str(value)
+                for value in (pid, class_name, selector)
+                if value not in ("", None)
+            )
+            print(f"[event] {event_name} {details}".rstrip())
 
         self._json_response(
             HTTPStatus.ACCEPTED,
