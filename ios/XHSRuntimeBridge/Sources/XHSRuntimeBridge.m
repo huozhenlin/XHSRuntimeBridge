@@ -156,7 +156,11 @@ static void XRBScanRuntime(void) {
     int classCount = objc_getClassList(NULL, 0);
     if (classCount <= 0) return;
 
-    Class *classes = calloc((size_t)classCount, sizeof(Class));
+    Class __unsafe_unretained *classes =
+        (Class __unsafe_unretained *)calloc(
+            (size_t)classCount,
+            sizeof(Class)
+        );
     classCount = objc_getClassList(classes, classCount);
 
     for (int index = 0; index < classCount; index++) {
