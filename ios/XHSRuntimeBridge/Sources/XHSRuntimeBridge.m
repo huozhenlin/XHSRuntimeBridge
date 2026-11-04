@@ -94,6 +94,12 @@ static NSString *XRBShortDescription(id value) {
     return text;
 }
 
+static NSArray<NSString *> *XRBCallStack(void) {
+    NSArray<NSString *> *symbols = NSThread.callStackSymbols;
+    NSUInteger count = MIN((NSUInteger)16, symbols.count);
+    return count > 0 ? [symbols subarrayWithRange:NSMakeRange(0, count)] : @[];
+}
+
 static IMP XRBOriginalImplementation(id self, SEL selector) {
     Class cls = object_getClass(self);
     pthread_mutex_lock(&gBusinessHooksLock);
@@ -119,7 +125,8 @@ static void XRBLogBusinessEnter(
 ) {
     NSMutableDictionary *fields = [NSMutableDictionary dictionaryWithDictionary:@{
         @"class": NSStringFromClass(object_getClass(self)) ?: @"",
-        @"selector": NSStringFromSelector(selector) ?: @""
+        @"selector": NSStringFromSelector(selector) ?: @"",
+        @"call_stack": XRBCallStack()
     }];
     if (extra) [fields addEntriesFromDictionary:extra];
     XRBLogEvent(@"business_method_enter", fields);
@@ -286,7 +293,15 @@ static void XRBInstallBusinessHooks(void) {
         @[@"XYVFVideoContentViewModel", @"setContentNoteModel:"],
         @[@"XYVFVideoContentViewModel", @"contentNoteModel"],
         @[@"XYVTPlayerConfigModel", @"setContentNoteModel:"],
-        @[@"XYVTPlayerConfigModel", @"contentNoteModel"]
+        @[@"XYVTPlayerConfigModel", @"contentNoteModel"],
+        @[@"XHSVideoDownloadSources", @"downloadVideo:"],
+        @[@"XHSVideoDownloadSources", @"Xdownload:"],
+        @[@"XHSVideoDownloadSources", @"Xdownload:preferredName:"],
+        @[@"XHSVideoDownloadSources", @"XdownloadAllPhotos:"],
+        @[@"XHSPhotoAlbumManager", @"saveImageWithUrl:authorId:"],
+        @[@"XHSPhotoAlbumManager", @"saveVideoWithURL:context:preferredName:"],
+        @[@"XHSPhotoAlbumManager", @"saveImageAtFileURL:preferredName:completion:"],
+        @[@"XHSPhotoAlbumManager", @"saveVideoAtFileURL:preferredName:completion:"]
     ];
     for (NSArray<NSString *> *target in targets) {
         XRBInstallBusinessHook(target[0], target[1]);
