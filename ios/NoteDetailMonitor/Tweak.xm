@@ -260,11 +260,12 @@ static void NDMReportController(
 ) {
     if (!NDMLooksLikeDetailController(controller)) return;
 
+    Class controllerClass = controller.class;
     NSMutableDictionary *event = [NSMutableDictionary dictionaryWithDictionary:@{
         @"event": @"note_detail_candidate",
         @"navigation": navigationKind ?: @"",
         @"controller": NDMControllerName(controller),
-        @"superclass": NSStringFromClass(controller.class.superclass) ?: @""
+        @"superclass": NSStringFromClass(class_getSuperclass(controllerClass)) ?: @""
     }];
     if (routeFields) [event addEntriesFromDictionary:routeFields];
 
