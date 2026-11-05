@@ -187,6 +187,89 @@ static void XRBCollectMediaURLs(
     }
 }
 
+static id XRBDeepSnapshot(
+    id object,
+    NSUInteger depth,
+    NSMutableSet<NSValue *> *seen,
+    NSUInteger *budget
+) {
+    if (!object || *budget == 0) return [NSNull null];
+    if (depth > 4) return @"<max-depth>";
+    (*budget)--;
+
+    if ([object isKindOfClass:NSNull.class] ||
+        [object isKindOfClass:NSString.class] ||
+        [object isKindOfClass:NSNumber.class]) {
+        if ([object isKindOfClass:NSString.class]) {
+            return XRBTruncateString(object, 4096);
+        }
+        return object;
+    }
+    if ([object isKindOfClass:NSURL.class]) {
+        return [object absoluteString] ?: @"";
+    }
+    if ([object isKindOfClass:NSArray.class]) {
+        NSMutableArray *array = [NSMutableArray array];
+        NSUInteger count = MIN((NSUInteger)[(NSArray *)object count], (NSUInteger)64);
+        for (NSUInteger index = 0; index < count && *budget > 0; index++) {
+            [array addObject:XRBDeepSnapshot(
+                [(NSArray *)object objectAtIndex:index],
+                depth + 1,
+                seen,
+                budget
+            ) ?: [NSNull null]];
+        }
+        return array;
+    }
+    if ([object isKindOfClass:NSDictionary.class]) {
+        NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+        NSUInteger count = 0;
+        for (id key in [(NSDictionary *)object allKeys]) {
+            if (count++ >= 128 || *budget == 0) break;
+            NSString *name = [key description] ?: @"";
+            id value = [(NSDictionary *)object objectForKey:key];
+            dictionary[name] = XRBDeepSnapshot(
+                value, depth + 1, seen, budget
+            ) ?: [NSNull null];
+        }
+        return dictionary;
+    }
+
+    NSValue *identity = [NSValue valueWithPointer:(__bridge const void *)object];
+    if ([seen containsObject:identity]) return @"<cycle>";
+    [seen addObject:identity];
+
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    result[@"__class"] = NSStringFromClass(object_getClass(object)) ?: @"";
+    NSMutableSet<NSString *> *propertyNames = [NSMutableSet set];
+    for (Class cls = object_getClass(object);
+         cls && cls != NSObject.class;
+         cls = class_getSuperclass(cls)) {
+        unsigned int count = 0;
+        objc_property_t *properties = class_copyPropertyList(cls, &count);
+        for (unsigned int index = 0; index < count; index++) {
+            const char *name = property_getName(properties[index]);
+            if (name) [propertyNames addObject:[NSString stringWithUTF8String:name]];
+        }
+        free(properties);
+    }
+
+    for (NSString *name in propertyNames) {
+        if (*budget == 0) break;
+        @try {
+            id value = [object valueForKey:name];
+            if (value) {
+                result[name] = XRBDeepSnapshot(
+                    value, depth + 1, seen, budget
+                ) ?: [NSNull null];
+            }
+        } @catch (__unused NSException *exception) {
+            result[name] = @"<unreadable>";
+        }
+    }
+    return result;
+}
+
 static NSDictionary *XRBModelSummary(id model) {
     if (!model) return @{};
     NSMutableDictionary *result = [NSMutableDictionary dictionary];
@@ -345,6 +428,16 @@ static void XRBHookVoidObject(id self, SEL selector, id argument) {
         summary[@"setter_class"] = NSStringFromClass(object_getClass(self))
             ?: @"";
         XRBLogEvent(@"note_model_received", summary);
+        NSMutableSet<NSValue *> *seen = [NSMutableSet set];
+        NSUInteger budget = 600;
+        XRBLogEvent(@"note_model_dump", @{
+            @"model_class": NSStringFromClass(object_getClass(argument))
+                ?: @"",
+            @"snapshot": XRBDeepSnapshot(
+                argument, 0, seen, &budget
+            ) ?: [NSNull null],
+            @"remaining_budget": @(budget)
+        });
     }
     IMP original = XRBOriginalImplementation(self, selector);
     if (original) {
