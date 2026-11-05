@@ -202,6 +202,15 @@ static id NDMReadKnownValue(id object, NSString *key) {
     if ([object isKindOfClass:NSDictionary.class]) {
         return [(NSDictionary *)object objectForKey:key];
     }
+    SEL objectForKey = @selector(objectForKey:);
+    if ([object respondsToSelector:objectForKey]) {
+        @try {
+            id (*lookup)(id, SEL, id) = (id (*)(id, SEL, id))objc_msgSend;
+            id value = lookup(object, objectForKey, key);
+            if (value) return value;
+        } @catch (__unused NSException *exception) {
+        }
+    }
 
     Class cls = object_getClass(object);
     if (!NDMHasDirectGetter(cls, key)) return nil;
@@ -822,6 +831,7 @@ static BOOL NDMStartActiveNoteFetch(
         event[@"response_class"] = response
             ? NSStringFromClass(object_getClass(response))
             : @"<nil>";
+    event[@"response_description"] = NDMShortString(response) ?: @"";
         event[@"model_class"] = model
             ? NSStringFromClass(object_getClass(model))
             : @"<nil>";
