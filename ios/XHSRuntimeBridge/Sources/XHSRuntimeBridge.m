@@ -237,27 +237,38 @@ static NSDictionary *XRBModelSummary(id model) {
     }
     if (videoURLs.count > 0) result[@"video_urls"] = videoURLs;
 
-    id interaction = XRBFirstField(model, @[
-        @"interactInfo", @"interact_info", @"interactionInfo",
-        @"interaction_info"
-    ]);
-    if (interaction) {
-        NSMutableDictionary *interactSummary = [NSMutableDictionary dictionary];
-        for (NSArray<NSString *> *field in @[
-            @[@"likedCount", @"liked_count"],
-            @[@"collectedCount", @"collected_count"],
-            @[@"commentCount", @"comment_count"],
-            @[@"shareCount", @"share_count"]
-        ]) {
+    NSMutableDictionary *interactSummary = [NSMutableDictionary dictionary];
+    NSArray<NSArray<NSString *> *> *counterFields = @[
+        @[@"likedCount", @"liked_count"],
+        @[@"likeCount", @"like_count"],
+        @[@"collectedCount", @"collected_count"],
+        @[@"collectCount", @"collect_count"],
+        @[@"commentCount", @"comment_count"],
+        @[@"commentsCount", @"comments_count"],
+        @[@"shareCount", @"share_count"],
+        @[@"viewCount", @"view_count"]
+    ];
+    NSArray *interactionObjects = @[
+        model ?: [NSNull null],
+        XRBFirstField(model, @[
+            @"interactInfo", @"interact_info", @"interactionInfo",
+            @"interaction_info", @"interact", @"interactions",
+            @"engageInfo", @"engage_info"
+        ]) ?: [NSNull null]
+    ];
+    for (id interaction in interactionObjects) {
+        if (interaction == [NSNull null]) continue;
+        for (NSArray<NSString *> *field in counterFields) {
+            if (interactSummary[field[1]]) continue;
             id value = XRBFirstField(interaction, @[field[0], field[1]]);
             if ([value isKindOfClass:NSNumber.class] ||
                 [value isKindOfClass:NSString.class]) {
                 interactSummary[field[1]] = value;
             }
         }
-        if (interactSummary.count > 0) {
-            result[@"interact_info"] = interactSummary;
-        }
+    }
+    if (interactSummary.count > 0) {
+        result[@"interact_info"] = interactSummary;
     }
 
     id author = XRBFirstField(model, @[@"user", @"userInfo", @"author"]);
