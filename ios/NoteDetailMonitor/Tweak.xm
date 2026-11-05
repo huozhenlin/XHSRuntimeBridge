@@ -21,6 +21,9 @@ static NSString *gPendingRequestID;
 static IMP gShoppingRouteOriginal;
 static IMP gHomeFeedRouteOriginal;
 static IMP gCommercialWSROriginal;
+static IMP gDebugViewModelOriginal;
+static IMP gWidgetModelOriginal;
+static IMP gPickDataOriginal;
 
 static os_log_t NDMLog(void) {
     static os_log_t log;
@@ -678,6 +681,67 @@ static void NDMHookObservedRoutes(void) {
     }
 }
 
+static id NDMObserveDetailGetter(
+    id self,
+    SEL selector,
+    IMP original
+) {
+    if (!original) return nil;
+    id result = ((id (*)(id, SEL))original)(self, selector);
+    NDMPostEvent(@{
+        @"event": @"detail_viewmodel_observed",
+        @"property": NSStringFromSelector(selector) ?: @"",
+        @"model_class": result
+            ? NSStringFromClass(object_getClass(result))
+            : @"<nil>",
+        @"fields": NDMExtractBusinessFields(result)
+    });
+    return result;
+}
+
+static id NDMDebugViewModelGetter(id self, SEL selector) {
+    return NDMObserveDetailGetter(self, selector, gDebugViewModelOriginal);
+}
+
+static id NDMWidgetModelGetter(id self, SEL selector) {
+    return NDMObserveDetailGetter(self, selector, gWidgetModelOriginal);
+}
+
+static id NDMPickDataGetter(id self, SEL selector) {
+    return NDMObserveDetailGetter(self, selector, gPickDataOriginal);
+}
+
+static void NDMInstallDetailViewModelHooks(void) {
+    Class cls = NSClassFromString(@"XYNoteModule.NoteDetailPageInterface");
+    if (!cls) return;
+
+    NSArray<NSArray<NSString *> *> *targets = @[
+        @[@"pu_debugCurrentViewModel", @"debug"],
+        @[@"wgt_getWidgetModel", @"widget"],
+        @[@"xyps_pickData", @"pick"]
+    ];
+    for (NSArray<NSString *> *target in targets) {
+        SEL selector = NSSelectorFromString(target[0]);
+        Method method = NDMDirectMethod(cls, selector);
+        if (!method || strcmp(method_getTypeEncoding(method), "@16@0:8") != 0) {
+            continue;
+        }
+        if ([target[1] isEqualToString:@"debug"] && !gDebugViewModelOriginal) {
+            gDebugViewModelOriginal = method_setImplementation(
+                method, (IMP)NDMDebugViewModelGetter
+            );
+        } else if ([target[1] isEqualToString:@"widget"] && !gWidgetModelOriginal) {
+            gWidgetModelOriginal = method_setImplementation(
+                method, (IMP)NDMWidgetModelGetter
+            );
+        } else if ([target[1] isEqualToString:@"pick"] && !gPickDataOriginal) {
+            gPickDataOriginal = method_setImplementation(
+                method, (IMP)NDMPickDataGetter
+            );
+        }
+    }
+}
+
 static void NDMRouteHookVoid(id self, SEL selector, id noteID) {
     NDMRouteObserved(self, selector, NDMShortString(noteID));
     if (gRouteOriginal) {
@@ -1049,6 +1113,7 @@ static void NDMExecuteCommand(NSDictionary *command) {
 
 static void NDMPollCommands(void) {
     NDMInstallRouteHook();
+    NDMInstallDetailViewModelHooks();
     NSURL *URL = NDMCommandURL();
     if (!URL) {
         NDMStartCommandPoll();
