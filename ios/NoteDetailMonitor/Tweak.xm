@@ -268,6 +268,73 @@ static NSString *NDMControllerName(UIViewController *controller) {
     return controller ? NSStringFromClass(controller.class) : @"";
 }
 
+static void NDMEmitControllerMetadata(UIViewController *controller) {
+    static NSMutableSet<NSString *> *sent;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        sent = [NSMutableSet set];
+    });
+
+    NSString *className = NDMControllerName(controller);
+    @synchronized (sent) {
+        if ([sent containsObject:className]) return;
+        [sent addObject:className];
+    }
+
+    NSMutableArray<NSString *> *properties = [NSMutableArray array];
+    NSMutableArray<NSString *> *methods = [NSMutableArray array];
+    for (Class cls = object_getClass(controller);
+         cls && cls != NSObject.class;
+         cls = class_getSuperclass(cls)) {
+        unsigned int propertyCount = 0;
+        objc_property_t *propertyList =
+            class_copyPropertyList(cls, &propertyCount);
+        for (unsigned int index = 0; index < propertyCount; index++) {
+            const char *name = property_getName(propertyList[index]);
+            NSString *text = name ? [NSString stringWithUTF8String:name] : @"";
+            NSString *lower = text.lowercaseString;
+            if ([lower containsString:@"note"] ||
+                [lower containsString:@"detail"] ||
+                [lower containsString:@"model"] ||
+                [lower containsString:@"data"] ||
+                [lower containsString:@"feed"] ||
+                [lower containsString:@"source"]) {
+                if (![properties containsObject:text]) {
+                    [properties addObject:text];
+                }
+            }
+        }
+        free(propertyList);
+
+        unsigned int methodCount = 0;
+        Method *methodList = class_copyMethodList(cls, &methodCount);
+        for (unsigned int index = 0; index < methodCount; index++) {
+            NSString *text = NSStringFromSelector(
+                method_getName(methodList[index])
+            );
+            NSString *lower = text.lowercaseString;
+            if ([lower containsString:@"note"] ||
+                [lower containsString:@"detail"] ||
+                [lower containsString:@"model"] ||
+                [lower containsString:@"data"] ||
+                [lower containsString:@"feed"] ||
+                [lower containsString:@"source"]) {
+                if (![methods containsObject:text]) {
+                    [methods addObject:text];
+                }
+            }
+        }
+        free(methodList);
+    }
+
+    NDMPostEvent(@{
+        @"event": @"detail_controller_metadata",
+        @"controller": className ?: @"",
+        @"properties": properties,
+        @"methods": methods
+    });
+}
+
 static NSArray<NSString *> *NDMCallStack(void) {
     NSArray<NSString *> *symbols = NSThread.callStackSymbols;
     NSUInteger count = MIN((NSUInteger)20, symbols.count);
@@ -300,6 +367,7 @@ static void NDMReportController(
     NSDictionary *routeFields
 ) {
     if (!NDMLooksLikeDetailController(controller)) return;
+    NDMEmitControllerMetadata(controller);
 
     Class controllerClass = controller.class;
     NSMutableDictionary *event = [NSMutableDictionary dictionaryWithDictionary:@{
