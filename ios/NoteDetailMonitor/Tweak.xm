@@ -683,6 +683,58 @@ static NSURL *NDMCommandURL(void) {
 
 static void NDMStartCommandPoll(void);
 
+static id NDMFetchNoteModelByID(NSString *noteID, NSString *requestID) {
+    Class api = NSClassFromString(@"XYNoteAPI");
+    SEL selector = @selector(fetchNoteDetailWithNoteId:);
+    if (!api || ![api respondsToSelector:selector]) {
+        NDMPostEvent(@{
+            @"event": @"note_api_probe_failed",
+            @"request_id": requestID ?: @"",
+            @"note_id": noteID ?: @"",
+            @"reason": @"XYNoteAPI unavailable"
+        });
+        return nil;
+    }
+
+    id model = ((id (*)(id, SEL, id))objc_msgSend)(api, selector, noteID);
+    NSMutableDictionary *fields = [NSMutableDictionary
+        dictionaryWithDictionary:NDMExtractBusinessFields(model)];
+    fields[@"event"] = @"note_api_probe_result";
+    fields[@"request_id"] = requestID ?: @"";
+    fields[@"note_id_requested"] = noteID ?: @"";
+    fields[@"result_class"] = model
+        ? NSStringFromClass(object_getClass(model))
+        : @"<nil>";
+    NDMPostEvent(fields);
+    return model;
+}
+
+static BOOL NDMRouteNoteModel(id model, NSString *requestID) {
+    if (!model) return NO;
+    Class router = NSClassFromString(@"XYShopping.SRouter");
+    SEL selector = NSSelectorFromString(
+        @"routeToNoteDetailsWith:title:note:extraSkuInfos:"
+    );
+    if (!router || ![router respondsToSelector:selector]) return NO;
+
+    NDMPostEvent(@{
+        @"event": @"shopping_router_requested",
+        @"request_id": requestID ?: @"",
+        @"model_class": NSStringFromClass(object_getClass(model)) ?: @""
+    });
+    dispatch_async(dispatch_get_main_queue(), ^{
+        ((void (*)(id, SEL, id, id, id, id))objc_msgSend)(
+            router,
+            selector,
+            nil,
+            nil,
+            model,
+            nil
+        );
+    });
+    return YES;
+}
+
 static void NDMExecuteCommand(NSDictionary *command) {
     NSString *name = command[@"command"];
     NSString *requestID = command[@"request_id"];
@@ -690,6 +742,26 @@ static void NDMExecuteCommand(NSDictionary *command) {
     NSString *strategy = command[@"strategy"] ?: @"auto";
     if (![name isEqualToString:@"open_note"] || noteID.length == 0) {
         return;
+    }
+
+    if ([strategy isEqualToString:@"auto"] ||
+        [strategy isEqualToString:@"xy_note_api"]) {
+        id model = NDMFetchNoteModelByID(noteID, requestID);
+        NSDictionary *modelFields = NDMExtractBusinessFields(model);
+        id resolvedID = modelFields[@"note_id"];
+        if (resolvedID && resolvedID != [NSNull null]) {
+            gPendingRequestID = requestID;
+            if (NDMRouteNoteModel(model, requestID)) return;
+        }
+        if ([strategy isEqualToString:@"xy_note_api"]) {
+            NDMPostEvent(@{
+                @"event": @"open_note_failed",
+                @"request_id": requestID ?: @"",
+                @"note_id": noteID,
+                @"reason": @"note_model_or_shopping_router_unavailable"
+            });
+            return;
+        }
     }
 
     SEL selector = gRouteSelector ?: @selector(openNoteDetailWithNoteID:);
