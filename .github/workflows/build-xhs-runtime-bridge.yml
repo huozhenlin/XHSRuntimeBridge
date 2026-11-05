@@ -8,6 +8,7 @@ on:
     paths:
       - ".github/workflows/build-xhs-runtime-bridge.yml"
       - "ios/XHSRuntimeBridge/**"
+      - "ios/NoteDetailMonitor/**"
 
 jobs:
   build:
