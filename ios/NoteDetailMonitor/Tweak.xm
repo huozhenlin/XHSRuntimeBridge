@@ -549,6 +549,78 @@ static void NDMShoppingRouteHook(
     }
 }
 
+static id NDMDeepSnapshot(
+    id object,
+    NSUInteger depth,
+    NSMutableSet<NSValue *> *seen,
+    NSUInteger *budget
+) {
+    if (!object || *budget == 0) return [NSNull null];
+    if (depth > 3) return @"<max-depth>";
+    (*budget)--;
+    if ([object isKindOfClass:NSNull.class] ||
+        [object isKindOfClass:NSNumber.class]) return object;
+    if ([object isKindOfClass:NSString.class]) {
+        NSString *text = object;
+        return text.length > 2048 ? [text substringToIndex:2048] : text;
+    }
+    if ([object isKindOfClass:NSURL.class]) return [object absoluteString];
+    if ([object isKindOfClass:NSArray.class]) {
+        NSMutableArray *values = [NSMutableArray array];
+        NSUInteger count = MIN((NSUInteger)[(NSArray *)object count],
+                               (NSUInteger)32);
+        for (NSUInteger index = 0; index < count && *budget > 0; index++) {
+            [values addObject:NDMDeepSnapshot(
+                [(NSArray *)object objectAtIndex:index],
+                depth + 1,
+                seen,
+                budget
+            ) ?: [NSNull null]];
+        }
+        return values;
+    }
+    if ([object isKindOfClass:NSDictionary.class]) {
+        NSMutableDictionary *values = [NSMutableDictionary dictionary];
+        NSUInteger count = 0;
+        for (id key in [(NSDictionary *)object allKeys]) {
+            if (count++ >= 64 || *budget == 0) break;
+            NSString *name = [key description] ?: @"";
+            values[name] = NDMDeepSnapshot(
+                [(NSDictionary *)object objectForKey:key],
+                depth + 1,
+                seen,
+                budget
+            ) ?: [NSNull null];
+        }
+        return values;
+    }
+
+    NSValue *identity = [NSValue valueWithPointer:(__bridge const void *)object];
+    if ([seen containsObject:identity]) return @"<cycle>";
+    [seen addObject:identity];
+    NSMutableDictionary *values = [NSMutableDictionary dictionary];
+    values[@"__class"] = NSStringFromClass(object_getClass(object)) ?: @"";
+    Class cls = object_getClass(object);
+    for (; cls && cls != NSObject.class; cls = class_getSuperclass(cls)) {
+        unsigned int count = 0;
+        objc_property_t *properties = class_copyPropertyList(cls, &count);
+        for (unsigned int index = 0; index < count && *budget > 0; index++) {
+            const char *rawName = property_getName(properties[index]);
+            if (!rawName) continue;
+            NSString *name = [NSString stringWithUTF8String:rawName];
+            @try {
+                id value = [object valueForKey:name];
+                if (value) values[name] = NDMDeepSnapshot(
+                    value, depth + 1, seen, budget
+                );
+            } @catch (__unused NSException *exception) {
+            }
+        }
+        free(properties);
+    }
+    return values;
+}
+
 static void NDMHomeFeedRouteHook(
     id self,
     SEL selector,
@@ -573,6 +645,17 @@ static void NDMHomeFeedRouteHook(
         : @"<nil>";
     fields[@"event"] = @"route_invoked";
     NDMPostEvent(fields);
+    NSMutableSet<NSValue *> *seen = [NSMutableSet set];
+    NSUInteger budget = 300;
+    NDMPostEvent(@{
+        @"event": @"route_item_dump",
+        @"note_id": fields[@"note_id"] ?: [NSNull null],
+        @"item_class": item
+            ? NSStringFromClass(object_getClass(item))
+            : @"<nil>",
+        @"snapshot": NDMDeepSnapshot(item, 0, seen, &budget),
+        @"remaining_budget": @(budget)
+    });
     if (gHomeFeedRouteOriginal) {
         ((void (*)(id, SEL, id, id, id, long, BOOL))gHomeFeedRouteOriginal)(
             self, selector, item, indexPath, channel, anchorIndex, dynamicCover
