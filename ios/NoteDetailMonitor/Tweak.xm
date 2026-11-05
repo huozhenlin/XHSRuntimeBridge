@@ -1277,6 +1277,57 @@ static BOOL NDMStartActiveNoteFetch(
     return YES;
 }
 
+static BOOL NDMOpenNoteDeepLink(
+    NSString *noteID,
+    NSString *requestID,
+    NSString *type
+) {
+    if (noteID.length == 0) return NO;
+
+    // The app's documented internal route is xhsdiscover://item/<id>.
+    // Keep the command narrow: only a note id and the normal/video type are
+    // accepted, rather than forwarding arbitrary URLs from the collector.
+    NSCharacterSet *allowed = [
+        NSCharacterSet characterSetWithCharactersInString:
+            @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+    ];
+    if ([noteID rangeOfCharacterFromSet:allowed.invertedSet].location != NSNotFound) {
+        NDMPostEvent(@{
+            @"event": @"deep_link_rejected",
+            @"request_id": requestID ?: @"",
+            @"note_id": noteID,
+            @"reason": @"note_id contains unsupported characters"
+        });
+        return NO;
+    }
+
+    NSString *routeType = [type isEqualToString:@"video"] ? @"video" : @"normal";
+    NSString *route = [NSString stringWithFormat:
+        @"xhsdiscover://item/%@?type=%@", noteID, routeType];
+    NSURL *URL = [NSURL URLWithString:route];
+    if (!URL) return NO;
+
+    NDMPostEvent(@{
+        @"event": @"deep_link_requested",
+        @"request_id": requestID ?: @"",
+        @"note_id": noteID,
+        @"route": [NSString stringWithFormat:
+            @"xhsdiscover://item/<note_id>?type=%@", routeType]
+    });
+
+    UIApplication *application = UIApplication.sharedApplication;
+    if (!application) return NO;
+
+    [application openURL:URL options:@{} completionHandler:^(BOOL success) {
+        NDMPostEvent(@{
+            @"event": success ? @"deep_link_accepted" : @"deep_link_failed",
+            @"request_id": requestID ?: @"",
+            @"note_id": noteID
+        });
+    }];
+    return YES;
+}
+
 static BOOL NDMRouteNoteModel(id model, NSString *requestID) {
     if (!model) return NO;
     Class router = NSClassFromString(@"XYShopping.SRouter");
@@ -1316,11 +1367,34 @@ static void NDMExecuteCommand(NSDictionary *command) {
         return;
     }
 
-    if ([strategy isEqualToString:@"auto"] ||
-        [strategy isEqualToString:@"xy_note_api"]) {
-        BOOL fetchOnly = [name isEqualToString:@"fetch_note"] ||
-            [strategy isEqualToString:@"fetch_only"];
-        if (NDMStartActiveNoteFetch(noteID, requestID, !fetchOnly)) return;
+    BOOL fetchOnly = [name isEqualToString:@"fetch_note"] ||
+        [strategy isEqualToString:@"fetch_only"];
+    if (!fetchOnly &&
+        ([strategy isEqualToString:@"deep_link"] ||
+         [strategy isEqualToString:@"url_scheme"] ||
+         [strategy isEqualToString:@"auto"])) {
+        NSString *type = command[@"type"] ?: @"normal";
+        if (NDMOpenNoteDeepLink(noteID, requestID, type)) return;
+        if ([strategy isEqualToString:@"deep_link"] ||
+            [strategy isEqualToString:@"url_scheme"]) {
+            NDMPostEvent(@{
+                @"event": @"open_note_failed",
+                @"request_id": requestID ?: @"",
+                @"note_id": noteID,
+                @"reason": @"deep link unavailable"
+            });
+            return;
+        }
+    }
+
+    if (!fetchOnly && ([strategy isEqualToString:@"auto"] ||
+        [strategy isEqualToString:@"xy_note_api"])) {
+        if (NDMStartActiveNoteFetch(noteID, requestID, YES)) return;
+    } else if (fetchOnly &&
+        ([strategy isEqualToString:@"auto"] ||
+         [strategy isEqualToString:@"fetch_only"] ||
+         [strategy isEqualToString:@"xy_note_api"])) {
+        if (NDMStartActiveNoteFetch(noteID, requestID, NO)) return;
     }
 
     SEL selector = gRouteSelector ?: @selector(openNoteDetailWithNoteID:);

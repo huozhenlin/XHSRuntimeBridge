@@ -1,42 +1,35 @@
-# XHS Runtime Collector
+﻿# XHS Runtime Collector
 
-Windows 上运行的结构化运行日志接收器。它只负责接收注入模块主动
-`POST` 的事件，不负责注入、抓包或绕过 TLS。
-
-## 启动
+Windows 涓婅繍琛岀殑缁撴瀯鍖栬繍琛屾棩蹇楁帴鏀跺櫒銆傚畠鍙礋璐ｆ帴鏀舵敞鍏ユā鍧椾富鍔?`POST` 鐨勪簨浠讹紝涓嶈礋璐ｆ敞鍏ャ€佹姄鍖呮垨缁曡繃 TLS銆?
+## 鍚姩
 
 ```powershell
-$env:XHS_LOG_TOKEN = "请替换为随机长字符串"
+$env:XHS_LOG_TOKEN = "璇锋浛鎹负闅忔満闀垮瓧绗︿覆"
 python .\tools\xhs_runtime_collector\collector.py `
   --host 0.0.0.0 `
   --port 8901
 ```
 
-检查服务：
+妫€鏌ユ湇鍔★細
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:17321/health
 ```
 
-首次使用需要在 Windows 防火墙中允许 Python 接收入站连接。手机和
-电脑需要能够互相访问；手机端配置使用电脑的局域网 IPv4 地址，而不是
-`127.0.0.1`。
+棣栨浣跨敤闇€瑕佸湪 Windows 闃茬伀澧欎腑鍏佽 Python 鎺ユ敹鍏ョ珯杩炴帴銆傛墜鏈哄拰
+鐢佃剳闇€瑕佽兘澶熶簰鐩歌闂紱鎵嬫満绔厤缃娇鐢ㄧ數鑴戠殑灞€鍩熺綉 IPv4 鍦板潃锛岃€屼笉鏄?`127.0.0.1`銆?
+## 浜嬩欢鍗忚
 
-## 事件协议
-
-请求：
-
+璇锋眰锛?
 ```http
 POST /events
-Authorization: Bearer <XHS_LOG_TOKEN>（可选）
+Authorization: Bearer <XHS_LOG_TOKEN>锛堝彲閫夛級
 Content-Type: application/json
 ```
 
-如果 Windows 没有设置 `XHS_LOG_TOKEN`，接收器不会要求
-`Authorization`，手机端 Token 可以留空。
-
-单条事件：
-
+濡傛灉 Windows 娌℃湁璁剧疆 `XHS_LOG_TOKEN`锛屾帴鏀跺櫒涓嶄細瑕佹眰
+`Authorization`锛屾墜鏈虹 Token 鍙互鐣欑┖銆?
+鍗曟潯浜嬩欢锛?
 ```json
 {
   "event": "method_enter",
@@ -50,14 +43,12 @@ Content-Type: application/json
 }
 ```
 
-也支持最多 200 条事件组成的 JSON 数组。服务会自动遮盖 Cookie、SID、
-Authorization、token、设备 ID 等常见敏感字段，然后写入：
-
+涔熸敮鎸佹渶澶?200 鏉′簨浠剁粍鎴愮殑 JSON 鏁扮粍銆傛湇鍔′細鑷姩閬洊 Cookie銆丼ID銆?Authorization銆乼oken銆佽澶?ID 绛夊父瑙佹晱鎰熷瓧娈碉紝鐒跺悗鍐欏叆锛?
 ```text
 tools/xhs_runtime_collector/data/events-YYYY-MM-DD.ndjson
 ```
 
-查看内存中的最近事件：
+鏌ョ湅鍐呭瓨涓殑鏈€杩戜簨浠讹細
 
 ```powershell
 $headers = @{ Authorization = "Bearer $env:XHS_LOG_TOKEN" }
@@ -66,10 +57,9 @@ Invoke-RestMethod `
   "http://127.0.0.1:17321/events/recent?limit=100"
 ```
 
-## 发送打开详情命令
+## 鍙戦€佹墦寮€璇︽儏鍛戒护
 
-手机端会主动轮询命令，因此 Windows 不需要直接连接 iPhone：
-
+鎵嬫満绔細涓诲姩杞鍛戒护锛屽洜姝?Windows 涓嶉渶瑕佺洿鎺ヨ繛鎺?iPhone锛?
 ```powershell
 $body = @{
   command = "open_note"
@@ -85,18 +75,16 @@ Invoke-RestMethod `
   -Body $body
 ```
 
-注入模块随后会从：
-
+娉ㄥ叆妯″潡闅忓悗浼氫粠锛?
 ```text
 GET /commands/next
 ```
 
-取出命令，在小红书主线程调用已观察到的详情路由。详情页加载完成后，
-`note_detail_open` 事件会带回同一个 `request_id`。
+鍙栧嚭鍛戒护锛屽湪灏忕孩涔︿富绾跨▼璋冪敤宸茶瀵熷埌鐨勮鎯呰矾鐢便€傝鎯呴〉鍔犺浇瀹屾垚鍚庯紝
+`note_detail_open` 浜嬩欢浼氬甫鍥炲悓涓€涓?`request_id`銆?
+## 鎺ㄨ崘浜嬩欢
 
-## 推荐事件
-
-先只发送控制流和类型信息，不要发送账号凭证或完整请求头：
+鍏堝彧鍙戦€佹帶鍒舵祦鍜岀被鍨嬩俊鎭紝涓嶈鍙戦€佽处鍙峰嚟璇佹垨瀹屾暣璇锋眰澶达細
 
 ```text
 dylib_loaded
@@ -109,18 +97,13 @@ note_model_received
 logger_error
 ```
 
-`note_detail_response` 初期建议只记录响应大小、顶层字段名和对象类型。
-确认采集范围合适后，再对白名单接口记录经过脱敏的业务字段。
+`note_detail_response` 鍒濇湡寤鸿鍙褰曞搷搴斿ぇ灏忋€侀《灞傚瓧娈靛悕鍜屽璞＄被鍨嬨€?纭閲囬泦鑼冨洿鍚堥€傚悗锛屽啀瀵圭櫧鍚嶅崟鎺ュ彛璁板綍缁忚繃鑴辨晱鐨勪笟鍔″瓧娈点€?
+## iOS/TrollStore 閰嶇疆娉ㄦ剰浜嬮」
 
-## iOS/TrollStore 配置注意事项
-
-小红书 9.15.1 本身已经声明本地网络用途、允许对应网络访问，所以 TrollStore
-注入场景不要求重新签名或修改 `Info.plist`。注入 dylib 后，直接在小红书
-右下角的 `⚙` 按钮内配置电脑 IP 和 token；它们会存入 App 自身的
-`NSUserDefaults`。
-
-更安全的长期方案是 HTTPS；明文 HTTP 仅建议用于可信隔离局域网中的短期调试。
-
+灏忕孩涔?9.15.1 鏈韩宸茬粡澹版槑鏈湴缃戠粶鐢ㄩ€斻€佸厑璁稿搴旂綉缁滆闂紝鎵€浠?TrollStore
+娉ㄥ叆鍦烘櫙涓嶈姹傞噸鏂扮鍚嶆垨淇敼 `Info.plist`銆傛敞鍏?dylib 鍚庯紝鐩存帴鍦ㄥ皬绾功
+鍙充笅瑙掔殑 `鈿檂 鎸夐挳鍐呴厤缃數鑴?IP 鍜?token锛涘畠浠細瀛樺叆 App 鑷韩鐨?`NSUserDefaults`銆?
+鏇村畨鍏ㄧ殑闀挎湡鏂规鏄?HTTPS锛涙槑鏂?HTTP 浠呭缓璁敤浜庡彲淇￠殧绂诲眬鍩熺綉涓殑鐭湡璋冭瘯銆?
 ## Active fetch without opening the UI
 
 Use `fetch_note` when the goal is to make the app request a note with its own
@@ -146,3 +129,35 @@ Watch for `note_detail_request_started`, `note_detail_network_result`, and
 `note_detail_fetch_completed`. `open_note` keeps the original behavior: fetch,
 then attempt to open the detail page. Sensitive session fields are not intended
 to be collected.
+
+## Deep-link active mode
+
+For normal UI-driven active lookup, use the app's own route instead of calling
+its private network executor directly:
+
+```powershell
+$body = @{
+  command = "open_note"
+  note_id = "6ae3f862000000001200f174"
+  type = "normal"
+  request_id = "scheme-001"
+  strategy = "deep_link"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://172.18.177.3:8901/commands/enqueue" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+The injected module requests only the constrained form
+`xhsdiscover://item/<note_id>?type=normal` or `type=video`; it does not accept
+arbitrary URLs from the command queue. The app then performs its normal detail
+loading flow, and the existing passive model hooks return the parsed model and
+media fields.
+
+Use `strategy = "auto"` to use the deep link path by default. Use
+`strategy = "xy_note_api"` to force the previous direct request path.
+
+\n

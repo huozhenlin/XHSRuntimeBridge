@@ -219,6 +219,7 @@ class CollectorHandler(BaseHTTPRequestHandler):
             command = str(payload.get("command", ""))
             note_id = str(payload.get("note_id", ""))
             strategy = str(payload.get("strategy", "auto"))
+            note_type = str(payload.get("type", "normal"))
             if command not in ("open_note", "fetch_note") or not note_id:
                 self._json_response(
                     HTTPStatus.BAD_REQUEST,
@@ -231,6 +232,7 @@ class CollectorHandler(BaseHTTPRequestHandler):
             command_payload = {
                 "command": command,
                 "note_id": note_id,
+                "type": note_type if note_type in ("normal", "video") else "normal",
                 "strategy": strategy,
                 "request_id": str(
                     payload.get("request_id")
