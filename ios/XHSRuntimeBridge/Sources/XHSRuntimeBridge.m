@@ -320,11 +320,17 @@ static void XRBHookVoidObject(id self, SEL selector, id argument) {
         @"argument_class": argument ? NSStringFromClass(object_getClass(argument)) : @"<nil>",
         @"argument_description": XRBShortDescription(argument)
     });
-    if ([NSStringFromSelector(selector)
-            isEqualToString:@"setContentNoteModel:"]) {
+    NSString *selectorName = NSStringFromSelector(selector);
+    if ([selectorName isEqualToString:@"setContentNoteModel:"] ||
+        [selectorName isEqualToString:@"setNote:"] ||
+        [selectorName isEqualToString:@"setNoteModel:"] ||
+        [selectorName isEqualToString:@"setNoteDetail:"] ||
+        [selectorName isEqualToString:@"setNoteDetailModel:"] ||
+        [selectorName isEqualToString:@"setContentModel:"] ||
+        [selectorName isEqualToString:@"setData:"]) {
         NSMutableDictionary *summary = [NSMutableDictionary
             dictionaryWithDictionary:XRBModelSummary(argument)];
-        summary[@"event"] = @"note_model_received";
+        summary[@"setter"] = selectorName;
         summary[@"setter_class"] = NSStringFromClass(object_getClass(self))
             ?: @"";
         XRBLogEvent(@"note_model_received", summary);
@@ -356,6 +362,19 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
     IMP original = XRBOriginalImplementation(self, selector);
     if (!original) return nil;
     id result = ((id (*)(id, SEL))original)(self, selector);
+    NSString *selectorName = NSStringFromSelector(selector);
+    if ([selectorName isEqualToString:@"contentNoteModel"] ||
+        [selectorName isEqualToString:@"noteDetailModel"] ||
+        [selectorName isEqualToString:@"noteDetail"] ||
+        [selectorName isEqualToString:@"noteModel"] ||
+        [selectorName isEqualToString:@"data"]) {
+        NSMutableDictionary *summary = [NSMutableDictionary
+            dictionaryWithDictionary:XRBModelSummary(result)];
+        summary[@"getter"] = selectorName;
+        summary[@"getter_class"] = NSStringFromClass(object_getClass(self))
+            ?: @"";
+        XRBLogEvent(@"note_model_received", summary);
+    }
     XRBLogEvent(@"business_method_exit", @{
         @"class": NSStringFromClass(object_getClass(self)) ?: @"",
         @"selector": NSStringFromSelector(selector) ?: @"",
@@ -484,6 +503,32 @@ static void XRBInstallBusinessHooks(void) {
         @[@"XYVFVideoContentDataSource", @"requestNoteDetailWithCompletion:"],
         @[@"XYVFVideoContentViewModel", @"setContentNoteModel:"],
         @[@"XYVTPlayerConfigModel", @"setContentNoteModel:"],
+        @[@"XYNoteModule.NoteDetailDataSource", @"setNote:"],
+        @[@"XYNoteModule.NoteDetailDataSource", @"setNoteModel:"],
+        @[@"XYNoteModule.NoteDetailDataSource", @"setNoteDetail:"],
+        @[@"XYNoteModule.NoteDetailDataSource", @"setNoteDetailModel:"],
+        @[@"XYNoteModule.NoteDetailDataSource", @"noteDetailModel"],
+        @[@"XYNoteModule.NoteDetailDataSource", @"noteModel"],
+        @[@"XYNoteModule.NoteDetailViewController", @"setNote:"],
+        @[@"XYNoteModule.NoteDetailViewController", @"setNoteModel:"],
+        @[@"XYNoteModule.NoteDetailViewController", @"setNoteDetail:"],
+        @[@"XYNoteModule.NoteDetailViewController", @"setNoteDetailModel:"],
+        @[@"XYNoteModule.NoteDetailViewController", @"noteDetailModel"],
+        @[@"XYNoteModule.NoteDetailViewController", @"noteModel"],
+        @[@"XYNoteModule.NoteDetailViewControllerV1", @"setNote:"],
+        @[@"XYNoteModule.NoteDetailViewControllerV1", @"setNoteModel:"],
+        @[@"XYNoteModule.NoteDetailViewControllerV1", @"setNoteDetail:"],
+        @[@"XYNoteModule.NoteDetailViewControllerV1", @"setNoteDetailModel:"],
+        @[@"XYNoteModule.NoteDetailViewControllerV1", @"noteDetailModel"],
+        @[@"XYNoteModule.NoteDetailViewControllerV1", @"noteModel"],
+        @[@"_TtC12XYNoteModule20NoteDetailDataSource", @"setNote:"],
+        @[@"_TtC12XYNoteModule20NoteDetailDataSource", @"setNoteModel:"],
+        @[@"_TtC12XYNoteModule20NoteDetailDataSource", @"setNoteDetail:"],
+        @[@"_TtC12XYNoteModule20NoteDetailDataSource", @"setNoteDetailModel:"],
+        @[@"_TtC12XYNoteModule24NoteDetailViewController", @"setNote:"],
+        @[@"_TtC12XYNoteModule24NoteDetailViewController", @"setNoteModel:"],
+        @[@"_TtC12XYNoteModule24NoteDetailViewController", @"setNoteDetail:"],
+        @[@"_TtC12XYNoteModule24NoteDetailViewController", @"setNoteDetailModel:"],
         @[@"XHSVideoDownloadSources", @"downloadVideo:"],
         @[@"XHSVideoDownloadSources", @"Xdownload:"],
         @[@"XHSVideoDownloadSources", @"Xdownload:preferredName:"],
