@@ -18,6 +18,8 @@ static SEL gRouteSelector;
 static IMP gRouteOriginal;
 static BOOL gRouteReturnsObject;
 static NSString *gPendingRequestID;
+static IMP gShoppingRouteOriginal;
+static IMP gHomeFeedRouteOriginal;
 
 static os_log_t NDMLog(void) {
     static os_log_t log;
@@ -423,6 +425,110 @@ static void NDMScanRouteCandidates(void) {
     free(classes);
 }
 
+static void NDMShoppingRouteHook(
+    id self,
+    SEL selector,
+    id context,
+    id title,
+    id note,
+    id extra
+) {
+    NSMutableDictionary *fields =
+        [NSMutableDictionary dictionaryWithDictionary:
+            NDMExtractBusinessFields(note)];
+    fields[@"class"] = NSStringFromClass((Class)self) ?: @"";
+    fields[@"selector"] = NSStringFromSelector(selector) ?: @"";
+    fields[@"title_class"] = title
+        ? NSStringFromClass(object_getClass(title))
+        : @"<nil>";
+    fields[@"extra_class"] = extra
+        ? NSStringFromClass(object_getClass(extra))
+        : @"<nil>";
+    fields[@"event"] = @"route_invoked";
+    NDMPostEvent(fields);
+    if (gShoppingRouteOriginal) {
+        ((void (*)(id, SEL, id, id, id, id))gShoppingRouteOriginal)(
+            self, selector, context, title, note, extra
+        );
+    }
+}
+
+static void NDMHomeFeedRouteHook(
+    id self,
+    SEL selector,
+    id item,
+    id indexPath,
+    id channel,
+    long anchorIndex,
+    BOOL dynamicCover
+) {
+    NSMutableDictionary *fields =
+        [NSMutableDictionary dictionaryWithDictionary:
+            NDMExtractBusinessFields(item)];
+    fields[@"class"] = NSStringFromClass((Class)self) ?: @"";
+    fields[@"selector"] = NSStringFromSelector(selector) ?: @"";
+    fields[@"anchor_index"] = @(anchorIndex);
+    fields[@"dynamic_cover"] = @(dynamicCover);
+    fields[@"index_path_class"] = indexPath
+        ? NSStringFromClass(object_getClass(indexPath))
+        : @"<nil>";
+    fields[@"channel_class"] = channel
+        ? NSStringFromClass(object_getClass(channel))
+        : @"<nil>";
+    fields[@"event"] = @"route_invoked";
+    NDMPostEvent(fields);
+    if (gHomeFeedRouteOriginal) {
+        ((void (*)(id, SEL, id, id, id, long, BOOL))gHomeFeedRouteOriginal)(
+            self, selector, item, indexPath, channel, anchorIndex, dynamicCover
+        );
+    }
+}
+
+static void NDMHookObservedRoutes(void) {
+    Class shopping = NSClassFromString(@"XYShopping.SRouter");
+    SEL shoppingSelector =
+        NSSelectorFromString(@"routeToNoteDetailsWith:title:note:extraSkuInfos:");
+    Method shoppingMethod = shopping
+        ? class_getClassMethod(shopping, shoppingSelector)
+        : NULL;
+    if (shoppingMethod &&
+        strcmp(method_getTypeEncoding(shoppingMethod),
+               "v48@0:8@16@24@32@40") == 0 &&
+        !gShoppingRouteOriginal) {
+        gShoppingRouteOriginal = method_setImplementation(
+            shoppingMethod,
+            (IMP)NDMShoppingRouteHook
+        );
+        NDMPostEvent(@{
+            @"event": @"route_hook_installed",
+            @"class": @"XYShopping.SRouter",
+            @"selector": NSStringFromSelector(shoppingSelector),
+            @"type_encoding": @"v48@0:8@16@24@32@40"
+        });
+    }
+
+    Class home = NSClassFromString(@"XYEXHomeFeedRouter");
+    SEL homeSelector = NSSelectorFromString(
+        @"routeToNoteDetailWithItem:atIndexPath:channel:anchorIndex:isDynamicCover:"
+    );
+    Method homeMethod = home ? class_getClassMethod(home, homeSelector) : NULL;
+    if (homeMethod &&
+        strcmp(method_getTypeEncoding(homeMethod),
+               "v52@0:8@16@24@32q40B48") == 0 &&
+        !gHomeFeedRouteOriginal) {
+        gHomeFeedRouteOriginal = method_setImplementation(
+            homeMethod,
+            (IMP)NDMHomeFeedRouteHook
+        );
+        NDMPostEvent(@{
+            @"event": @"route_hook_installed",
+            @"class": @"XYEXHomeFeedRouter",
+            @"selector": NSStringFromSelector(homeSelector),
+            @"type_encoding": @"v52@0:8@16@24@32q40B48"
+        });
+    }
+}
+
 static void NDMRouteHookVoid(id self, SEL selector, id noteID) {
     NDMRouteObserved(self, selector, NDMShortString(noteID));
     if (gRouteOriginal) {
@@ -733,6 +839,7 @@ static void NDMStartCommandPoll(void) {
         dispatch_async(dispatch_get_main_queue(), ^{
             NDMInstallRouteHook();
             NDMScanRouteCandidates();
+            NDMHookObservedRoutes();
             NDMStartCommandPoll();
         });
     }
