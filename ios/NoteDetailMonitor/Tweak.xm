@@ -182,7 +182,8 @@ static NSArray<NSString *> *NDMKeys(void) {
     return @[
         @"noteId", @"noteID", @"note_id",
         @"userId", @"userID", @"user_id", @"authorId", @"author_id",
-        @"source", @"sourceType", @"source_type", @"scene", @"entry",
+        @"source", @"sourceType", @"source_type", @"sourceId",
+        @"sourceIDForRouter", @"scene", @"entry",
         @"from", @"entrance", @"pageSource", @"openSource",
         @"feedId", @"feed_id"
     ];
@@ -244,6 +245,7 @@ static NSDictionary *NDMExtractBusinessFields(id object) {
                    [normalized containsString:@"author"]) {
             outputKey = @"user_id";
         } else if ([normalized containsString:@"source"] ||
+                   [normalized containsString:@"sourceid"] ||
                    [normalized containsString:@"scene"] ||
                    [normalized containsString:@"entry"] ||
                    [normalized containsString:@"from"] ||
@@ -391,7 +393,8 @@ static void NDMReportController(
     }
 
     for (NSString *modelKey in @[
-        @"note", @"noteModel", @"contentNoteModel", @"noteFeed", @"feed"
+        @"note", @"noteModel", @"contentNoteModel", @"noteFeed", @"feed",
+        @"pu_debugCurrentViewModel", @"wgt_getWidgetModel", @"xyps_pickData"
     ]) {
         id model = NDMReadKnownValue(controller, modelKey);
         if (!model) continue;
