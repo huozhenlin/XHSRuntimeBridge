@@ -24,6 +24,8 @@ static IMP gCommercialWSROriginal;
 static IMP gDebugViewModelOriginal;
 static IMP gWidgetModelOriginal;
 static IMP gPickDataOriginal;
+static IMP gWidgetModelSetterOriginal;
+static IMP gPickDataSetterOriginal;
 
 static os_log_t NDMLog(void) {
     static os_log_t log;
@@ -711,6 +713,33 @@ static id NDMPickDataGetter(id self, SEL selector) {
     return NDMObserveDetailGetter(self, selector, gPickDataOriginal);
 }
 
+static void NDMObserveDetailSetter(
+    id self,
+    SEL selector,
+    id value,
+    IMP original
+) {
+    NDMPostEvent(@{
+        @"event": @"detail_viewmodel_observed",
+        @"property": NSStringFromSelector(selector) ?: @"",
+        @"model_class": value
+            ? NSStringFromClass(object_getClass(value))
+            : @"<nil>",
+        @"fields": NDMExtractBusinessFields(value)
+    });
+    if (original) {
+        ((void (*)(id, SEL, id))original)(self, selector, value);
+    }
+}
+
+static void NDMWidgetModelSetter(id self, SEL selector, id value) {
+    NDMObserveDetailSetter(self, selector, value, gWidgetModelSetterOriginal);
+}
+
+static void NDMPickDataSetter(id self, SEL selector, id value) {
+    NDMObserveDetailSetter(self, selector, value, gPickDataSetterOriginal);
+}
+
 static void NDMInstallDetailViewModelHooks(void) {
     Class cls = NSClassFromString(@"XYNoteModule.NoteDetailPageInterface");
     if (!cls) return;
@@ -718,12 +747,20 @@ static void NDMInstallDetailViewModelHooks(void) {
     NSArray<NSArray<NSString *> *> *targets = @[
         @[@"pu_debugCurrentViewModel", @"debug"],
         @[@"wgt_getWidgetModel", @"widget"],
-        @[@"xyps_pickData", @"pick"]
+        @[@"xyps_pickData", @"pick"],
+        @[@"wgt_setWidgetModel:", @"widget_set"],
+        @[@"setXyps_pickData:", @"pick_set"]
     ];
     for (NSArray<NSString *> *target in targets) {
         SEL selector = NSSelectorFromString(target[0]);
         Method method = NDMDirectMethod(cls, selector);
-        if (!method || strcmp(method_getTypeEncoding(method), "@16@0:8") != 0) {
+        if (!method) {
+            continue;
+        }
+        const char *encoding = method_getTypeEncoding(method);
+        if ([target[1] hasSuffix:@"_set"]) {
+            if (strcmp(encoding, "v24@0:8@16") != 0) continue;
+        } else if (strcmp(encoding, "@16@0:8") != 0) {
             continue;
         }
         if ([target[1] isEqualToString:@"debug"] && !gDebugViewModelOriginal) {
@@ -737,6 +774,16 @@ static void NDMInstallDetailViewModelHooks(void) {
         } else if ([target[1] isEqualToString:@"pick"] && !gPickDataOriginal) {
             gPickDataOriginal = method_setImplementation(
                 method, (IMP)NDMPickDataGetter
+            );
+        } else if ([target[1] isEqualToString:@"widget_set"] &&
+                   !gWidgetModelSetterOriginal) {
+            gWidgetModelSetterOriginal = method_setImplementation(
+                method, (IMP)NDMWidgetModelSetter
+            );
+        } else if ([target[1] isEqualToString:@"pick_set"] &&
+                   !gPickDataSetterOriginal) {
+            gPickDataSetterOriginal = method_setImplementation(
+                method, (IMP)NDMPickDataSetter
             );
         }
     }
