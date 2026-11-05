@@ -211,6 +211,22 @@ class CollectorHandler(BaseHTTPRequestHandler):
             pid = event.get("pid", "")
             class_name = event.get("class", "")
             selector = event.get("selector", "")
+            if event_name == "note_detail_candidate":
+                details = " ".join(
+                    f"{key}={event.get(key)}"
+                    for key in (
+                        "navigation",
+                        "controller",
+                        "model_class",
+                        "note_id",
+                        "user_id",
+                        "source",
+                        "feed_id",
+                    )
+                    if event.get(key) not in (None, "")
+                )
+                print(f"[event] {event_name} {pid} {details}".rstrip())
+                continue
             details = " ".join(
                 str(value)
                 for value in (pid, class_name, selector)
