@@ -173,6 +173,7 @@ static NSArray<NSString *> *NDMKeys(void) {
         @"noteId", @"noteID", @"note_id",
         @"userId", @"userID", @"user_id", @"authorId", @"author_id",
         @"source", @"sourceType", @"source_type", @"scene", @"entry",
+        @"from", @"entrance", @"pageSource", @"openSource",
         @"feedId", @"feed_id"
     ];
 }
@@ -225,7 +226,9 @@ static NSDictionary *NDMExtractBusinessFields(id object) {
             outputKey = @"user_id";
         } else if ([normalized containsString:@"source"] ||
                    [normalized containsString:@"scene"] ||
-                   [normalized containsString:@"entry"]) {
+                   [normalized containsString:@"entry"] ||
+                   [normalized containsString:@"from"] ||
+                   [normalized containsString:@"entrance"]) {
             outputKey = @"source";
         } else if ([normalized containsString:@"feed"]) {
             outputKey = @"feed_id";
@@ -288,6 +291,13 @@ static void NDMReportController(
         }
         event[@"model_class"] = NSStringFromClass(object_getClass(model));
         break;
+    }
+    id noteID = event[@"note_id"];
+    if ([navigationKind isEqualToString:@"appear"] &&
+        noteID && noteID != [NSNull null] &&
+        [noteID isKindOfClass:NSString.class] &&
+        [noteID length] > 0) {
+        event[@"event"] = @"note_detail_open";
     }
     NDMPostEvent(event);
 }

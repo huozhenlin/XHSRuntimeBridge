@@ -211,7 +211,7 @@ class CollectorHandler(BaseHTTPRequestHandler):
             pid = event.get("pid", "")
             class_name = event.get("class", "")
             selector = event.get("selector", "")
-            if event_name == "note_detail_candidate":
+            if event_name in ("note_detail_candidate", "note_detail_open"):
                 details = " ".join(
                     f"{key}={event.get(key)}"
                     for key in (
