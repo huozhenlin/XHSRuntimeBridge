@@ -94,6 +94,65 @@ static NSString *XRBShortDescription(id value) {
     return text;
 }
 
+static id XRBReadField(id object, NSString *key) {
+    if (!object || !key.length) return nil;
+    if ([object isKindOfClass:NSDictionary.class]) {
+        return [(NSDictionary *)object objectForKey:key];
+    }
+    Class cls = object_getClass(object);
+    SEL selector = NSSelectorFromString(key);
+    Method method = class_getInstanceMethod(cls, selector);
+    if (!method) return nil;
+    const char *encoding = method_getTypeEncoding(method);
+    if (!encoding || encoding[0] != '@') return nil;
+    @try {
+        return [object valueForKey:key];
+    } @catch (__unused NSException *exception) {
+        return nil;
+    }
+}
+
+static NSDictionary *XRBModelSummary(id model) {
+    if (!model) return @{};
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    NSArray<NSArray<NSString *> *> *fields = @[
+        @[@"noteId", @"note_id"],
+        @[@"noteID", @"note_id"],
+        @[@"userId", @"user_id"],
+        @[@"userID", @"user_id"],
+        @[@"title", @"title"],
+        @[@"desc", @"desc"],
+        @[@"type", @"type"],
+        @[@"source", @"source"]
+    ];
+    for (NSArray<NSString *> *field in fields) {
+        id value = XRBReadField(model, field[0]);
+        if (!value || result[field[1]]) continue;
+        if ([value isKindOfClass:NSString.class] ||
+            [value isKindOfClass:NSNumber.class]) {
+            result[field[1]] = value;
+        }
+    }
+
+    for (NSString *key in @[@"images", @"imageList", @"image_list"]) {
+        id value = XRBReadField(model, key);
+        if ([value isKindOfClass:NSArray.class]) {
+            result[@"image_count"] = @([(NSArray *)value count]);
+            break;
+        }
+    }
+    for (NSString *key in @[@"video", @"videoInfo", @"video_info_v2"]) {
+        id value = XRBReadField(model, key);
+        if (value) {
+            result[@"video_present"] = @YES;
+            result[@"video_class"] = NSStringFromClass(object_getClass(value));
+            break;
+        }
+    }
+    result[@"model_class"] = NSStringFromClass(object_getClass(model)) ?: @"";
+    return result;
+}
+
 static NSArray<NSString *> *XRBCallStack(void) {
     NSArray<NSString *> *symbols = NSThread.callStackSymbols;
     NSUInteger count = MIN((NSUInteger)16, symbols.count);
@@ -137,6 +196,15 @@ static void XRBHookVoidObject(id self, SEL selector, id argument) {
         @"argument_class": argument ? NSStringFromClass(object_getClass(argument)) : @"<nil>",
         @"argument_description": XRBShortDescription(argument)
     });
+    if ([NSStringFromSelector(selector)
+            isEqualToString:@"setContentNoteModel:"]) {
+        NSMutableDictionary *summary = [NSMutableDictionary
+            dictionaryWithDictionary:XRBModelSummary(argument)];
+        summary[@"event"] = @"note_model_received";
+        summary[@"setter_class"] = NSStringFromClass(object_getClass(self))
+            ?: @"";
+        XRBLogEvent(@"note_model_received", summary);
+    }
     IMP original = XRBOriginalImplementation(self, selector);
     if (original) {
         ((void (*)(id, SEL, id))original)(self, selector, argument);
