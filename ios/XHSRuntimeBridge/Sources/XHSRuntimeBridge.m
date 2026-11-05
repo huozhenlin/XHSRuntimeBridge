@@ -112,6 +112,81 @@ static id XRBReadField(id object, NSString *key) {
     }
 }
 
+static id XRBFirstField(id object, NSArray<NSString *> *keys) {
+    for (NSString *key in keys) {
+        id value = XRBReadField(object, key);
+        if (value) return value;
+    }
+    return nil;
+}
+
+static NSString *XRBTruncateString(NSString *value, NSUInteger limit) {
+    if (value.length <= limit) return value;
+    return [value substringToIndex:limit];
+}
+
+static NSString *XRBURLValue(id value) {
+    if ([value isKindOfClass:NSURL.class]) {
+        return [(NSURL *)value absoluteString];
+    }
+    if ([value isKindOfClass:NSString.class] &&
+        [(NSString *)value hasPrefix:@"http"]) {
+        return value;
+    }
+    return nil;
+}
+
+static void XRBAddURLIfNew(
+    NSMutableArray<NSString *> *urls,
+    id value
+) {
+    NSString *url = XRBURLValue(value);
+    if (url.length > 0 && ![urls containsObject:url] && urls.count < 32) {
+        [urls addObject:url];
+    }
+}
+
+static void XRBCollectMediaURLs(
+    id object,
+    NSMutableArray<NSString *> *urls,
+    NSUInteger depth
+) {
+    if (!object || depth > 2 || urls.count >= 32) return;
+    XRBAddURLIfNew(urls, object);
+
+    if ([object isKindOfClass:NSArray.class]) {
+        for (id item in (NSArray *)object) {
+            XRBCollectMediaURLs(item, urls, depth + 1);
+            if (urls.count >= 32) break;
+        }
+        return;
+    }
+    if ([object isKindOfClass:NSDictionary.class]) {
+        for (NSString *key in @[
+            @"url", @"urlDefault", @"url_default", @"originUrl",
+            @"origin_url", @"master_url", @"masterUrl", @"default_url"
+        ]) {
+            XRBAddURLIfNew(urls, [(NSDictionary *)object objectForKey:key]);
+        }
+        for (NSString *key in @[@"h264", @"stream", @"streams", @"media"]) {
+            XRBCollectMediaURLs(
+                [(NSDictionary *)object objectForKey:key],
+                urls,
+                depth + 1
+            );
+        }
+        return;
+    }
+
+    for (NSString *key in @[
+        @"url", @"urlDefault", @"url_default", @"originUrl",
+        @"origin_url", @"master_url", @"masterUrl", @"default_url",
+        @"h264", @"stream", @"streams", @"media"
+    ]) {
+        XRBCollectMediaURLs(XRBReadField(object, key), urls, depth + 1);
+    }
+}
+
 static NSDictionary *XRBModelSummary(id model) {
     if (!model) return @{};
     NSMutableDictionary *result = [NSMutableDictionary dictionary];
@@ -130,10 +205,19 @@ static NSDictionary *XRBModelSummary(id model) {
         if (!value || result[field[1]]) continue;
         if ([value isKindOfClass:NSString.class] ||
             [value isKindOfClass:NSNumber.class]) {
-            result[field[1]] = value;
+            result[field[1]] = [value isKindOfClass:NSString.class]
+                ? XRBTruncateString(value, 4096)
+                : value;
         }
     }
 
+    NSMutableArray<NSString *> *imageURLs = [NSMutableArray array];
+    id images = XRBFirstField(model, @[
+        @"images", @"imageList", @"image_list", @"imageInfoList",
+        @"image_info_list"
+    ]);
+    XRBCollectMediaURLs(images, imageURLs, 0);
+    if (imageURLs.count > 0) result[@"image_urls"] = imageURLs;
     for (NSString *key in @[@"images", @"imageList", @"image_list"]) {
         id value = XRBReadField(model, key);
         if ([value isKindOfClass:NSArray.class]) {
@@ -141,13 +225,53 @@ static NSDictionary *XRBModelSummary(id model) {
             break;
         }
     }
+    NSMutableArray<NSString *> *videoURLs = [NSMutableArray array];
     for (NSString *key in @[@"video", @"videoInfo", @"video_info_v2"]) {
         id value = XRBReadField(model, key);
         if (value) {
             result[@"video_present"] = @YES;
             result[@"video_class"] = NSStringFromClass(object_getClass(value));
+            XRBCollectMediaURLs(value, videoURLs, 0);
             break;
         }
+    }
+    if (videoURLs.count > 0) result[@"video_urls"] = videoURLs;
+
+    id interaction = XRBFirstField(model, @[
+        @"interactInfo", @"interact_info", @"interactionInfo",
+        @"interaction_info"
+    ]);
+    if (interaction) {
+        NSMutableDictionary *interactSummary = [NSMutableDictionary dictionary];
+        for (NSArray<NSString *> *field in @[
+            @[@"likedCount", @"liked_count"],
+            @[@"collectedCount", @"collected_count"],
+            @[@"commentCount", @"comment_count"],
+            @[@"shareCount", @"share_count"]
+        ]) {
+            id value = XRBFirstField(interaction, @[field[0], field[1]]);
+            if ([value isKindOfClass:NSNumber.class] ||
+                [value isKindOfClass:NSString.class]) {
+                interactSummary[field[1]] = value;
+            }
+        }
+        if (interactSummary.count > 0) {
+            result[@"interact_info"] = interactSummary;
+        }
+    }
+
+    id author = XRBFirstField(model, @[@"user", @"userInfo", @"author"]);
+    if (author) {
+        NSMutableDictionary *authorSummary = [NSMutableDictionary dictionary];
+        id authorID = XRBFirstField(author, @[
+            @"userId", @"userID", @"user_id", @"authorId", @"author_id"
+        ]);
+        id nickname = XRBFirstField(author, @[@"nickname", @"name", @"nickName"]);
+        if (authorID) authorSummary[@"user_id"] = authorID;
+        if ([nickname isKindOfClass:NSString.class]) {
+            authorSummary[@"nickname"] = XRBTruncateString(nickname, 256);
+        }
+        if (authorSummary.count > 0) result[@"author"] = authorSummary;
     }
     result[@"model_class"] = NSStringFromClass(object_getClass(model)) ?: @"";
     return result;
