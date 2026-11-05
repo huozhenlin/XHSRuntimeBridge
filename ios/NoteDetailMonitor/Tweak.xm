@@ -371,6 +371,58 @@ static Method NDMDirectMethod(Class cls, SEL selector) {
     return result;
 }
 
+static void NDMScanRouteCandidates(void) {
+    NSArray<NSString *> *selectorNames = @[
+        @"openNoteDetail",
+        @"transitionToNoteDetailWithNote:",
+        @"routeToNoteDetailWithItem:atIndexPath:channel:anchorIndex:isDynamicCover:",
+        @"routeToNoteDetailsWith:title:note:extraSkuInfos:",
+        @"presentNoteDetailWithConfig:saveActionHandler:saveActionTrackHandler:shareToFriendResult:delegate:"
+    ];
+
+    int count = objc_getClassList(NULL, 0);
+    if (count <= 0) return;
+    Class __unsafe_unretained *classes =
+        (Class __unsafe_unretained *)calloc((size_t)count, sizeof(Class));
+    count = objc_getClassList(classes, count);
+
+    for (int index = 0; index < count; index++) {
+        Class cls = classes[index];
+        for (NSString *selectorName in selectorNames) {
+            SEL selector = NSSelectorFromString(selectorName);
+            Method instanceMethod = NDMDirectMethod(cls, selector);
+            if (instanceMethod) {
+                const char *encoding = method_getTypeEncoding(instanceMethod);
+                NDMPostEvent(@{
+                    @"event": @"route_candidate_discovered",
+                    @"class": NSStringFromClass(cls) ?: @"",
+                    @"owner_kind": @"instance",
+                    @"selector": selectorName,
+                    @"type_encoding": encoding
+                        ? [NSString stringWithUTF8String:encoding]
+                        : @""
+                });
+            }
+
+            Class metaClass = object_getClass(cls);
+            Method classMethod = NDMDirectMethod(metaClass, selector);
+            if (classMethod) {
+                const char *encoding = method_getTypeEncoding(classMethod);
+                NDMPostEvent(@{
+                    @"event": @"route_candidate_discovered",
+                    @"class": NSStringFromClass(cls) ?: @"",
+                    @"owner_kind": @"class",
+                    @"selector": selectorName,
+                    @"type_encoding": encoding
+                        ? [NSString stringWithUTF8String:encoding]
+                        : @""
+                });
+            }
+        }
+    }
+    free(classes);
+}
+
 static void NDMRouteHookVoid(id self, SEL selector, id noteID) {
     NDMRouteObserved(self, selector, NDMShortString(noteID));
     if (gRouteOriginal) {
@@ -675,6 +727,7 @@ static void NDMStartCommandPoll(void) {
         NSLog(@"[NoteDetailMonitor] loaded");
         dispatch_async(dispatch_get_main_queue(), ^{
             NDMInstallRouteHook();
+            NDMScanRouteCandidates();
             NDMStartCommandPoll();
         });
     }
