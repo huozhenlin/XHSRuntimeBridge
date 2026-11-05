@@ -20,6 +20,7 @@ static BOOL gRouteReturnsObject;
 static NSString *gPendingRequestID;
 static IMP gShoppingRouteOriginal;
 static IMP gHomeFeedRouteOriginal;
+static IMP gCommercialWSROriginal;
 
 static os_log_t NDMLog(void) {
     static os_log_t log;
@@ -487,6 +488,40 @@ static void NDMHomeFeedRouteHook(
     }
 }
 
+static void NDMCommercialWSRHook(
+    id self,
+    SEL selector,
+    id wsrURL,
+    id keyPath,
+    id customContent,
+    id completion
+) {
+    NSString *keyPathDescription = NDMShortString(keyPath) ?: @"";
+    NDMPostEvent(@{
+        @"event": @"wsr_request_enter",
+        @"class": NSStringFromClass((Class)self) ?: @"",
+        @"selector": NSStringFromSelector(selector) ?: @"",
+        @"wsr_url_class": wsrURL
+            ? NSStringFromClass(object_getClass(wsrURL))
+            : @"<nil>",
+        @"key_path_class": keyPath
+            ? NSStringFromClass(object_getClass(keyPath))
+            : @"<nil>",
+        @"key_path_length": @(keyPathDescription.length),
+        @"custom_content_class": customContent
+            ? NSStringFromClass(object_getClass(customContent))
+            : @"<nil>",
+        @"completion_class": completion
+            ? NSStringFromClass(object_getClass(completion))
+            : @"<nil>"
+    });
+    if (gCommercialWSROriginal) {
+        ((void (*)(id, SEL, id, id, id, id))gCommercialWSROriginal)(
+            self, selector, wsrURL, keyPath, customContent, completion
+        );
+    }
+}
+
 static void NDMHookObservedRoutes(void) {
     Class shopping = NSClassFromString(@"XYShopping.SRouter");
     SEL shoppingSelector =
@@ -528,6 +563,31 @@ static void NDMHookObservedRoutes(void) {
             @"class": @"XYEXHomeFeedRouter",
             @"selector": NSStringFromSelector(homeSelector),
             @"type_encoding": @"v52@0:8@16@24@32q40B48"
+        });
+    }
+
+    Class commercial = NSClassFromString(
+        @"XYCommercialAPISet.CommercialNetwork"
+    );
+    SEL wsrSelector = NSSelectorFromString(
+        @"requestWithWsrurl:keyPath:customContent:completion:"
+    );
+    Method wsrMethod = commercial
+        ? class_getClassMethod(commercial, wsrSelector)
+        : NULL;
+    if (wsrMethod &&
+        strcmp(method_getTypeEncoding(wsrMethod),
+               "v48@0:8@16@24@32@?40") == 0 &&
+        !gCommercialWSROriginal) {
+        gCommercialWSROriginal = method_setImplementation(
+            wsrMethod,
+            (IMP)NDMCommercialWSRHook
+        );
+        NDMPostEvent(@{
+            @"event": @"wsr_hook_installed",
+            @"class": @"XYCommercialAPISet.CommercialNetwork",
+            @"selector": NSStringFromSelector(wsrSelector),
+            @"type_encoding": @"v48@0:8@16@24@32@?40"
         });
     }
 }
