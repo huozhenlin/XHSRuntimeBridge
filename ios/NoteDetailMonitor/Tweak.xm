@@ -398,6 +398,12 @@ static void NDMReportController(
     ]) {
         id model = NDMReadKnownValue(controller, modelKey);
         if (!model) continue;
+        NDMPostEvent(@{
+            @"event": @"detail_viewmodel_observed",
+            @"property": modelKey,
+            @"model_class": NSStringFromClass(object_getClass(model)) ?: @"",
+            @"fields": NDMExtractBusinessFields(model)
+        });
         NSDictionary *modelFields = NDMExtractBusinessFields(model);
         for (NSString *key in @[@"note_id", @"user_id", @"source", @"feed_id"]) {
             id value = modelFields[key];
