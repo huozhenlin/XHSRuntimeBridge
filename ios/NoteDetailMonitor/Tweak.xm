@@ -746,30 +746,125 @@ static NSURL *NDMCommandURL(void) {
 
 static void NDMStartCommandPoll(void);
 
-static id NDMFetchNoteModelByID(NSString *noteID, NSString *requestID) {
+static id NDMFindModelInResponse(id response) {
+    if (!response) return nil;
+    NSDictionary *direct = NDMExtractBusinessFields(response);
+    id directID = direct[@"note_id"];
+    if (directID && directID != [NSNull null]) return response;
+
+    NSArray<NSString *> *keys = @[
+        @"data", @"model", @"object", @"result", @"payload", @"value"
+    ];
+    for (NSString *key in keys) {
+        id nested = NDMReadKnownValue(response, key);
+        if (!nested) continue;
+        NSDictionary *fields = NDMExtractBusinessFields(nested);
+        id nestedID = fields[@"note_id"];
+        if (nestedID && nestedID != [NSNull null]) return nested;
+    }
+    return nil;
+}
+
+static BOOL NDMStartActiveNoteFetch(
+    NSString *noteID,
+    NSString *requestID
+) {
     Class api = NSClassFromString(@"XYNoteAPI");
-    SEL selector = @selector(fetchNoteDetailWithNoteId:);
-    if (!api || ![api respondsToSelector:selector]) {
+    SEL fetchSelector = @selector(fetchNoteDetailWithNoteId:);
+    if (!api || ![api respondsToSelector:fetchSelector]) {
         NDMPostEvent(@{
-            @"event": @"note_api_probe_failed",
+            @"event": @"open_note_failed",
             @"request_id": requestID ?: @"",
             @"note_id": noteID ?: @"",
             @"reason": @"XYNoteAPI unavailable"
         });
-        return nil;
+        return NO;
     }
 
-    id model = ((id (*)(id, SEL, id))objc_msgSend)(api, selector, noteID);
-    NSMutableDictionary *fields = [NSMutableDictionary
-        dictionaryWithDictionary:NDMExtractBusinessFields(model)];
-    fields[@"event"] = @"note_api_probe_result";
-    fields[@"request_id"] = requestID ?: @"";
-    fields[@"note_id_requested"] = noteID ?: @"";
-    fields[@"result_class"] = model
-        ? NSStringFromClass(object_getClass(model))
-        : @"<nil>";
-    NDMPostEvent(fields);
-    return model;
+    id wsrURL = ((id (*)(id, SEL, id))objc_msgSend)(
+        api, fetchSelector, noteID
+    );
+    if (!wsrURL) {
+        NDMPostEvent(@{
+            @"event": @"open_note_failed",
+            @"request_id": requestID ?: @"",
+            @"note_id": noteID ?: @"",
+            @"reason": @"WSRURL creation failed"
+        });
+        return NO;
+    }
+
+    Class network = NSClassFromString(
+        @"XYCommercialAPISet.CommercialNetwork"
+    );
+    SEL requestSelector = NSSelectorFromString(
+        @"requestWithWsrurl:keyPath:customContent:completion:"
+    );
+    if (!network || ![network respondsToSelector:requestSelector]) {
+        NDMPostEvent(@{
+            @"event": @"open_note_failed",
+            @"request_id": requestID ?: @"",
+            @"note_id": noteID ?: @"",
+            @"reason": @"WorldSnake executor unavailable"
+        });
+        return NO;
+    }
+
+    gPendingRequestID = requestID;
+    void (^completion)(id) = ^(id response) {
+        id model = NDMFindModelInResponse(response);
+        NSMutableDictionary *event = [NSMutableDictionary
+            dictionaryWithDictionary:NDMExtractBusinessFields(model)];
+        event[@"event"] = @"note_detail_network_result";
+        event[@"request_id"] = requestID ?: @"";
+        event[@"note_id_requested"] = noteID ?: @"";
+        event[@"response_class"] = response
+            ? NSStringFromClass(object_getClass(response))
+            : @"<nil>";
+        event[@"model_class"] = model
+            ? NSStringFromClass(object_getClass(model))
+            : @"<nil>";
+        NDMPostEvent(event);
+
+        if (model && NDMRouteNoteModel(model, requestID)) {
+            return;
+        }
+        NDMPostEvent(@{
+            @"event": @"open_note_failed",
+            @"request_id": requestID ?: @"",
+            @"note_id": noteID ?: @"",
+            @"reason": @"detail model not found in WSR response"
+        });
+    };
+
+    @try {
+        ((void (*)(id, SEL, id, id, id, id))objc_msgSend)(
+            network,
+            requestSelector,
+            wsrURL,
+            nil,
+            nil,
+            completion
+        );
+    } @catch (NSException *exception) {
+        NDMPostEvent(@{
+            @"event": @"open_note_failed",
+            @"request_id": requestID ?: @"",
+            @"note_id": noteID ?: @"",
+            @"reason": @"WorldSnake executor exception",
+            @"exception": exception.name ?: @""
+        });
+        return NO;
+    }
+
+    NDMPostEvent(@{
+        @"event": @"note_detail_request_started",
+        @"request_id": requestID ?: @"",
+        @"note_id": noteID,
+        @"wsr_url_class": NSStringFromClass(object_getClass(wsrURL))
+            ?: @""
+    });
+    return YES;
 }
 
 static BOOL NDMRouteNoteModel(id model, NSString *requestID) {
@@ -809,22 +904,7 @@ static void NDMExecuteCommand(NSDictionary *command) {
 
     if ([strategy isEqualToString:@"auto"] ||
         [strategy isEqualToString:@"xy_note_api"]) {
-        id model = NDMFetchNoteModelByID(noteID, requestID);
-        NSDictionary *modelFields = NDMExtractBusinessFields(model);
-        id resolvedID = modelFields[@"note_id"];
-        if (resolvedID && resolvedID != [NSNull null]) {
-            gPendingRequestID = requestID;
-            if (NDMRouteNoteModel(model, requestID)) return;
-        }
-        if ([strategy isEqualToString:@"xy_note_api"]) {
-            NDMPostEvent(@{
-                @"event": @"open_note_failed",
-                @"request_id": requestID ?: @"",
-                @"note_id": noteID,
-                @"reason": @"note_model_or_shopping_router_unavailable"
-            });
-            return;
-        }
+        if (NDMStartActiveNoteFetch(noteID, requestID)) return;
     }
 
     SEL selector = gRouteSelector ?: @selector(openNoteDetailWithNoteID:);
