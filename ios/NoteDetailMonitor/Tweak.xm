@@ -26,6 +26,7 @@ static IMP gWidgetModelOriginal;
 static IMP gPickDataOriginal;
 static IMP gWidgetModelSetterOriginal;
 static IMP gPickDataSetterOriginal;
+static void NDMInstallDetailViewModelHooks(void);
 
 static os_log_t NDMLog(void) {
     static os_log_t log;
@@ -753,14 +754,37 @@ static void NDMInstallDetailViewModelHooks(void) {
     ];
     for (NSArray<NSString *> *target in targets) {
         SEL selector = NSSelectorFromString(target[0]);
-        Method method = NDMDirectMethod(cls, selector);
+        Method method = class_getInstanceMethod(cls, selector);
         if (!method) {
+            NDMPostEvent(@{
+                @"event": @"detail_viewmodel_hook_candidate",
+                @"property": target[0],
+                @"status": @"method_not_found"
+            });
             continue;
         }
         const char *encoding = method_getTypeEncoding(method);
         if ([target[1] hasSuffix:@"_set"]) {
-            if (strcmp(encoding, "v24@0:8@16") != 0) continue;
+            if (strcmp(encoding, "v24@0:8@16") != 0) {
+                NDMPostEvent(@{
+                    @"event": @"detail_viewmodel_hook_candidate",
+                    @"property": target[0],
+                    @"status": @"unsupported",
+                    @"type_encoding": encoding
+                        ? [NSString stringWithUTF8String:encoding]
+                        : @""
+                });
+                continue;
+            }
         } else if (strcmp(encoding, "@16@0:8") != 0) {
+            NDMPostEvent(@{
+                @"event": @"detail_viewmodel_hook_candidate",
+                @"property": target[0],
+                @"status": @"unsupported",
+                @"type_encoding": encoding
+                    ? [NSString stringWithUTF8String:encoding]
+                    : @""
+            });
             continue;
         }
         if ([target[1] isEqualToString:@"debug"] && !gDebugViewModelOriginal) {
@@ -786,6 +810,13 @@ static void NDMInstallDetailViewModelHooks(void) {
                 method, (IMP)NDMPickDataSetter
             );
         }
+        NDMPostEvent(@{
+            @"event": @"detail_viewmodel_hook_installed",
+            @"property": target[0],
+            @"type_encoding": encoding
+                ? [NSString stringWithUTF8String:encoding]
+                : @""
+        });
     }
 }
 
