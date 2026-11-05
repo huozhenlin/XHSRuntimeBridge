@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 
 #import <os/log.h>
 
@@ -11,6 +12,12 @@ static NSString *const NDMCollectorURLKey = @"XRBCollectorEndpoint";
 static NSString *const NDMMarkerHeader = @"X-NoteDetail-Monitor";
 static NSString *const NDMLogDirectory = @"NoteDetailMonitor";
 static NSString *const NDMLogFile = @"events.ndjson";
+
+static __weak id gLastRouteObject;
+static SEL gRouteSelector;
+static IMP gRouteOriginal;
+static BOOL gRouteReturnsObject;
+static NSString *gPendingRequestID;
 
 static os_log_t NDMLog(void) {
     static os_log_t log;
@@ -327,7 +334,204 @@ static void NDMReportController(
         [noteID length] > 0) {
         event[@"event"] = @"note_detail_open";
     }
+    if (gPendingRequestID.length > 0) {
+        event[@"request_id"] = gPendingRequestID;
+        if ([event[@"event"] isEqualToString:@"note_detail_open"]) {
+            gPendingRequestID = nil;
+        }
+    }
     NDMPostEvent(event);
+}
+
+static void NDMRouteObserved(id self, SEL selector, NSString *noteID) {
+    gLastRouteObject = self;
+    gRouteSelector = selector;
+    NDMPostEvent(@{
+        @"event": @"note_route_observed",
+        @"class": NSStringFromClass(object_getClass(self)) ?: @"",
+        @"selector": NSStringFromSelector(selector) ?: @"",
+        @"note_id": noteID ?: [NSNull null]
+    });
+}
+
+static void NDMRouteHookVoid(id self, SEL selector, id noteID) {
+    NDMRouteObserved(self, selector, NDMShortString(noteID));
+    if (gRouteOriginal) {
+        ((void (*)(id, SEL, id))gRouteOriginal)(self, selector, noteID);
+    }
+}
+
+static id NDMRouteHookObject(id self, SEL selector, id noteID) {
+    NDMRouteObserved(self, selector, NDMShortString(noteID));
+    if (!gRouteOriginal) return nil;
+    return ((id (*)(id, SEL, id))gRouteOriginal)(self, selector, noteID);
+}
+
+static void NDMInstallRouteHook(void) {
+    if (gRouteOriginal) return;
+    SEL selector = @selector(openNoteDetailWithNoteID:);
+    int count = objc_getClassList(NULL, 0);
+    if (count <= 0) return;
+
+    Class __unsafe_unretained *classes =
+        (Class __unsafe_unretained *)calloc((size_t)count, sizeof(Class));
+    count = objc_getClassList(classes, count);
+    for (int index = 0; index < count; index++) {
+        Class cls = classes[index];
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(cls, &methodCount);
+        for (unsigned int methodIndex = 0;
+             methodIndex < methodCount;
+             methodIndex++) {
+            Method method = methods[methodIndex];
+            if (method_getName(method) != selector) continue;
+
+            const char *encoding = method_getTypeEncoding(method);
+            IMP replacement = NULL;
+            if (strcmp(encoding, "v24@0:8@16") == 0) {
+                replacement = (IMP)NDMRouteHookVoid;
+                gRouteReturnsObject = NO;
+            } else if (strcmp(encoding, "@24@0:8@16") == 0) {
+                replacement = (IMP)NDMRouteHookObject;
+                gRouteReturnsObject = YES;
+            } else {
+                NDMPostEvent(@{
+                    @"event": @"route_hook_unsupported",
+                    @"class": NSStringFromClass(cls) ?: @"",
+                    @"selector": NSStringFromSelector(selector),
+                    @"type_encoding": encoding
+                        ? [NSString stringWithUTF8String:encoding]
+                        : @""
+                });
+                continue;
+            }
+
+            gRouteOriginal = method_setImplementation(method, replacement);
+            gRouteSelector = selector;
+            NDMPostEvent(@{
+                @"event": @"route_hook_installed",
+                @"class": NSStringFromClass(cls) ?: @"",
+                @"selector": NSStringFromSelector(selector),
+                @"type_encoding": encoding
+                    ? [NSString stringWithUTF8String:encoding]
+                    : @""
+            });
+            free(methods);
+            free(classes);
+            return;
+        }
+        free(methods);
+    }
+    free(classes);
+}
+
+static NSURL *NDMCommandURL(void) {
+    NSURL *endpoint = NDMEndpoint();
+    if (!endpoint) return nil;
+    NSURLComponents *components = [
+        NSURLComponents componentsWithURL:endpoint
+        resolvingAgainstBaseURL:NO
+    ];
+    components.path = @"/commands/next";
+    components.query = nil;
+    return components.URL;
+}
+
+static void NDMStartCommandPoll(void);
+
+static void NDMExecuteCommand(NSDictionary *command) {
+    NSString *name = command[@"command"];
+    NSString *requestID = command[@"request_id"];
+    NSString *noteID = command[@"note_id"];
+    if (![name isEqualToString:@"open_note"] || noteID.length == 0) {
+        return;
+    }
+
+    if (!gLastRouteObject ||
+        !gRouteSelector ||
+        ![gLastRouteObject respondsToSelector:gRouteSelector]) {
+        NDMPostEvent(@{
+            @"event": @"open_note_failed",
+            @"request_id": requestID ?: @"",
+            @"note_id": noteID,
+            @"reason": @"route_instance_not_observed"
+        });
+        return;
+    }
+
+    gPendingRequestID = requestID;
+    NDMPostEvent(@{
+        @"event": @"open_note_requested",
+        @"request_id": requestID ?: @"",
+        @"note_id": noteID,
+        @"route_class": NSStringFromClass(
+            object_getClass(gLastRouteObject)
+        ) ?: @""
+    });
+
+    id route = gLastRouteObject;
+    SEL selector = gRouteSelector;
+    BOOL returnsObject = gRouteReturnsObject;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (returnsObject) {
+            ((id (*)(id, SEL, id))objc_msgSend)(route, selector, noteID);
+        } else {
+            ((void (*)(id, SEL, id))objc_msgSend)(route, selector, noteID);
+        }
+    });
+}
+
+static void NDMPollCommands(void) {
+    NDMInstallRouteHook();
+    NSURL *URL = NDMCommandURL();
+    if (!URL) {
+        NDMStartCommandPoll();
+        return;
+    }
+
+    NSMutableURLRequest *request = [
+        NSMutableURLRequest requestWithURL:URL
+    ];
+    request.HTTPMethod = @"GET";
+    [request setValue:@"1" forHTTPHeaderField:NDMMarkerHeader];
+    NSString *token = NDMToken();
+    if (token.length > 0) {
+        [request setValue:[@"Bearer " stringByAppendingString:token]
+       forHTTPHeaderField:@"Authorization"];
+    }
+
+    NSURLSessionDataTask *task = [
+        [NSURLSession sharedSession]
+        dataTaskWithRequest:request
+        completionHandler:^(NSData *data, __unused NSURLResponse *response,
+                            __unused NSError *error) {
+            if (data.length > 0) {
+                NSDictionary *JSON = [
+                    NSJSONSerialization JSONObjectWithData:data
+                                                  options:0
+                                                    error:nil
+                ];
+                NSDictionary *command = JSON[@"command"];
+                if ([command isKindOfClass:NSDictionary.class]) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        NDMExecuteCommand(command);
+                    });
+                }
+            }
+            NDMStartCommandPoll();
+        }
+    ];
+    [task resume];
+}
+
+static void NDMStartCommandPoll(void) {
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)),
+        dispatch_get_main_queue(),
+        ^{
+            NDMPollCommands();
+        }
+    );
 }
 
 %group NoteDetailNavigation
@@ -369,5 +573,9 @@ static void NDMReportController(
         });
         %init(NoteDetailNavigation);
         NSLog(@"[NoteDetailMonitor] loaded");
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NDMInstallRouteHook();
+            NDMStartCommandPoll();
+        });
     }
 }

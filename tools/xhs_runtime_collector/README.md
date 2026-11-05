@@ -66,6 +66,33 @@ Invoke-RestMethod `
   "http://127.0.0.1:17321/events/recent?limit=100"
 ```
 
+## 发送打开详情命令
+
+手机端会主动轮询命令，因此 Windows 不需要直接连接 iPhone：
+
+```powershell
+$body = @{
+  command = "open_note"
+  note_id = "6ae4132f000000000300bbb2"
+  request_id = "manual-001"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://127.0.0.1:8901/commands/enqueue" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+注入模块随后会从：
+
+```text
+GET /commands/next
+```
+
+取出命令，在小红书主线程调用已观察到的详情路由。详情页加载完成后，
+`note_detail_open` 事件会带回同一个 `request_id`。
+
 ## 推荐事件
 
 先只发送控制流和类型信息，不要发送账号凭证或完整请求头：

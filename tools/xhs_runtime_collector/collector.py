@@ -62,6 +62,7 @@ class EventStore:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.recent: deque[dict[str, Any]] = deque(maxlen=recent_limit)
         self.lock = threading.Lock()
+        self.commands: deque[dict[str, Any]] = deque(maxlen=200)
 
     def append(self, event: dict[str, Any], remote: str) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
@@ -86,6 +87,14 @@ class EventStore:
         limit = max(1, min(limit, self.recent.maxlen or MAX_RECENT_EVENTS))
         with self.lock:
             return list(self.recent)[-limit:]
+
+    def enqueue_command(self, command: dict[str, Any]) -> None:
+        with self.lock:
+            self.commands.append(command)
+
+    def take_command(self) -> dict[str, Any] | None:
+        with self.lock:
+            return self.commands.popleft() if self.commands else None
 
 
 class CollectorServer(ThreadingHTTPServer):
@@ -142,6 +151,17 @@ class CollectorHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if parsed.path == "/commands/next":
+            if not self._authorized():
+                self._json_response(HTTPStatus.UNAUTHORIZED, {"ok": False})
+                return
+            command = self.server.store.take_command()
+            self._json_response(
+                HTTPStatus.OK,
+                {"ok": True, "command": command},
+            )
+            return
+
         if parsed.path == "/events/recent":
             if not self._authorized():
                 self._json_response(HTTPStatus.UNAUTHORIZED, {"ok": False})
@@ -161,7 +181,8 @@ class CollectorHandler(BaseHTTPRequestHandler):
         self._json_response(HTTPStatus.NOT_FOUND, {"ok": False})
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
-        if urlparse(self.path).path != "/events":
+        path = urlparse(self.path).path
+        if path not in ("/events", "/commands/enqueue"):
             self._json_response(HTTPStatus.NOT_FOUND, {"ok": False})
             return
         if not self._authorized():
@@ -185,6 +206,41 @@ class CollectorHandler(BaseHTTPRequestHandler):
             self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"ok": False, "error": "body must be UTF-8 JSON"},
+            )
+            return
+
+        if path == "/commands/enqueue":
+            if not isinstance(payload, dict):
+                self._json_response(
+                    HTTPStatus.BAD_REQUEST,
+                    {"ok": False, "error": "command must be an object"},
+                )
+                return
+            command = str(payload.get("command", ""))
+            note_id = str(payload.get("note_id", ""))
+            if command != "open_note" or not note_id:
+                self._json_response(
+                    HTTPStatus.BAD_REQUEST,
+                    {"ok": False, "error": "expected open_note and note_id"},
+                )
+                return
+            command_payload = {
+                "command": command,
+                "note_id": note_id,
+                "request_id": str(
+                    payload.get("request_id")
+                    or f"req-{int(datetime.now().timestamp() * 1000)}"
+                ),
+                "queued_at": datetime.now(timezone.utc).isoformat(),
+            }
+            self.server.store.enqueue_command(command_payload)
+            print(
+                f"[command] queued {command_payload['request_id']} "
+                f"note_id={note_id}"
+            )
+            self._json_response(
+                HTTPStatus.ACCEPTED,
+                {"ok": True, "request_id": command_payload["request_id"]},
             )
             return
 
