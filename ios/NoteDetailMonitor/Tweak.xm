@@ -220,12 +220,13 @@ static id NDMReadKnownValue(id object, NSString *key) {
     }
 
     Class cls = object_getClass(object);
-    if (!NDMHasDirectGetter(cls, key)) return nil;
-    @try {
-        return [object valueForKey:key];
-    } @catch (__unused NSException *exception) {
-        return nil;
+    if (NDMHasDirectGetter(cls, key)) {
+        @try {
+            return [object valueForKey:key];
+        } @catch (__unused NSException *exception) {
+        }
     }
+    return nil;
 }
 
 static NSDictionary *NDMExtractBusinessFields(id object) {
@@ -350,9 +351,19 @@ static NSArray<NSString *> *NDMCallStack(void) {
 }
 
 static NSArray<NSString *> *NDMDictionaryKeys(id value) {
-    if (![value isKindOfClass:NSDictionary.class]) return @[];
+    if (!value) return @[];
     NSMutableArray<NSString *> *keys = [NSMutableArray array];
-    for (id key in [(NSDictionary *)value allKeys]) {
+    NSArray *rawKeys = nil;
+    if ([value isKindOfClass:NSDictionary.class]) {
+        rawKeys = [(NSDictionary *)value allKeys];
+    } else if ([value respondsToSelector:@selector(allKeys)]) {
+        @try {
+            rawKeys = [value allKeys];
+        } @catch (__unused NSException *exception) {
+            rawKeys = nil;
+        }
+    }
+    for (id key in rawKeys ?: @[]) {
         NSString *text = [key description] ?: @"";
         if (!NDMIsSensitiveKey(text) && text.length > 0) {
             [keys addObject:text];
@@ -579,17 +590,28 @@ static id NDMDeepSnapshot(
         }
         return values;
     }
-    if ([object isKindOfClass:NSDictionary.class]) {
+    BOOL dictionaryLike = [object isKindOfClass:NSDictionary.class] ||
+        [object respondsToSelector:@selector(allKeys)] &&
+        [object respondsToSelector:@selector(objectForKey:)];
+    if (dictionaryLike) {
         NSMutableDictionary *values = [NSMutableDictionary dictionary];
         NSUInteger count = 0;
-        for (id key in [(NSDictionary *)object allKeys]) {
+        NSArray *keys = nil;
+        @try {
+            keys = [object allKeys];
+        } @catch (__unused NSException *exception) {
+            keys = nil;
+        }
+        for (id key in keys ?: @[]) {
             if (count++ >= 64 || *budget == 0) break;
             NSString *name = [key description] ?: @"";
+            id child = nil;
+            @try {
+                child = [object objectForKey:key];
+            } @catch (__unused NSException *exception) {
+            }
             values[name] = NDMDeepSnapshot(
-                [(NSDictionary *)object objectForKey:key],
-                depth + 1,
-                seen,
-                budget
+                child, depth + 1, seen, budget
             ) ?: [NSNull null];
         }
         return values;
@@ -1058,28 +1080,84 @@ static NSURL *NDMCommandURL(void) {
 static void NDMStartCommandPoll(void);
 static BOOL NDMRouteNoteModel(id model, NSString *requestID);
 
-static id NDMFindModelInResponse(id response) {
-    if (!response) return nil;
+static id NDMFindModelInResponse(
+    id response,
+    NSUInteger depth,
+    NSMutableSet<NSValue *> *seen,
+    NSString **pathOut
+) {
+    if (!response || depth > 6) return nil;
+
     NSDictionary *direct = NDMExtractBusinessFields(response);
     id directID = direct[@"note_id"];
-    if (directID && directID != [NSNull null]) return response;
+    if (directID && directID != [NSNull null]) {
+        if (pathOut) *pathOut = @"$";
+        return response;
+    }
 
-    NSArray<NSString *> *keys = @[
-        @"data", @"model", @"object", @"result", @"payload", @"value"
+    if (![response isKindOfClass:NSString.class] &&
+        ![response isKindOfClass:NSNumber.class] &&
+        ![response isKindOfClass:NSNull.class]) {
+        NSValue *identity = [NSValue valueWithPointer:(__bridge const void *)response];
+        if ([seen containsObject:identity]) return nil;
+        [seen addObject:identity];
+    }
+
+    if ([response isKindOfClass:NSArray.class]) {
+        NSUInteger index = 0;
+        for (id child in (NSArray *)response) {
+            NSString *childPath = nil;
+            id found = NDMFindModelInResponse(
+                child, depth + 1, seen, &childPath
+            );
+            if (found) {
+                if (pathOut) {
+                    *pathOut = [NSString stringWithFormat:@"$[%lu]%@",
+                        (unsigned long)index,
+                        childPath.length > 1 ? [@"" stringByAppendingString:
+                            [childPath substringFromIndex:1]] : @""];
+                }
+                return found;
+            }
+            index++;
+        }
+        return nil;
+    }
+
+    NSArray<NSString *> *preferredKeys = @[
+        @"data", @"note", @"noteData", @"note_info", @"noteInfo",
+        @"model", @"object", @"result", @"payload", @"response", @"value"
     ];
+    NSMutableArray<NSString *> *keys = [NSMutableArray array];
+    [keys addObjectsFromArray:preferredKeys];
+    for (NSString *key in NDMDictionaryKeys(response)) {
+        if (![keys containsObject:key]) [keys addObject:key];
+    }
+
     for (NSString *key in keys) {
         id nested = NDMReadKnownValue(response, key);
         if (!nested) continue;
-        NSDictionary *fields = NDMExtractBusinessFields(nested);
-        id nestedID = fields[@"note_id"];
-        if (nestedID && nestedID != [NSNull null]) return nested;
+        NSString *childPath = nil;
+        id found = NDMFindModelInResponse(
+            nested, depth + 1, seen, &childPath
+        );
+        if (found) {
+            if (pathOut) {
+                *pathOut = [NSString stringWithFormat:@"$.%@%@",
+                    key,
+                    childPath.length > 1 ? [@"" stringByAppendingString:
+                        [childPath substringFromIndex:1]] : @""];
+            }
+            return found;
+        }
     }
     return nil;
 }
 
 static BOOL NDMStartActiveNoteFetch(
     NSString *noteID,
-    NSString *requestID
+    NSString *requestID,
+    BOOL openUI
 ) {
     Class api = NSClassFromString(@"XYNoteAPI");
     SEL fetchSelector = @selector(fetchNoteDetailWithNoteId:);
@@ -1124,7 +1202,10 @@ static BOOL NDMStartActiveNoteFetch(
 
     gPendingRequestID = requestID;
     void (^completion)(id) = ^(id response) {
-        id model = NDMFindModelInResponse(response);
+        NSString *modelPath = nil;
+        id model = NDMFindModelInResponse(
+            response, 0, [NSMutableSet set], &modelPath
+        );
         NSMutableDictionary *event = [NSMutableDictionary
             dictionaryWithDictionary:NDMExtractBusinessFields(model)];
         event[@"event"] = @"note_detail_network_result";
@@ -1133,11 +1214,27 @@ static BOOL NDMStartActiveNoteFetch(
         event[@"response_class"] = response
             ? NSStringFromClass(object_getClass(response))
             : @"<nil>";
-    event[@"response_description"] = NDMShortString(response) ?: @"";
+        event[@"response_keys"] = NDMDictionaryKeys(response);
+        NSUInteger responseBudget = 600;
+        event[@"response_snapshot"] = NDMDeepSnapshot(
+            response, 0, [NSMutableSet set], &responseBudget
+        ) ?: [NSNull null];
         event[@"model_class"] = model
             ? NSStringFromClass(object_getClass(model))
             : @"<nil>";
+        event[@"model_path"] = modelPath ?: [NSNull null];
         NDMPostEvent(event);
+
+        if (!openUI) {
+            NDMPostEvent(@{
+                @"event": @"note_detail_fetch_completed",
+                @"request_id": requestID ?: @"",
+                @"note_id_requested": noteID ?: @"",
+                @"model_found": @(model != nil),
+                @"model_path": modelPath ?: [NSNull null]
+            });
+            return;
+        }
 
         if (model && NDMRouteNoteModel(model, requestID)) {
             return;
@@ -1211,13 +1308,19 @@ static void NDMExecuteCommand(NSDictionary *command) {
     NSString *requestID = command[@"request_id"];
     NSString *noteID = command[@"note_id"];
     NSString *strategy = command[@"strategy"] ?: @"auto";
-    if (![name isEqualToString:@"open_note"] || noteID.length == 0) {
+    if (![name isEqualToString:@"open_note"] &&
+        ![name isEqualToString:@"fetch_note"]) {
+        return;
+    }
+    if (noteID.length == 0) {
         return;
     }
 
     if ([strategy isEqualToString:@"auto"] ||
         [strategy isEqualToString:@"xy_note_api"]) {
-        if (NDMStartActiveNoteFetch(noteID, requestID)) return;
+        BOOL fetchOnly = [name isEqualToString:@"fetch_note"] ||
+            [strategy isEqualToString:@"fetch_only"];
+        if (NDMStartActiveNoteFetch(noteID, requestID, !fetchOnly)) return;
     }
 
     SEL selector = gRouteSelector ?: @selector(openNoteDetailWithNoteID:);

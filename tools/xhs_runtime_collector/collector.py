@@ -219,10 +219,13 @@ class CollectorHandler(BaseHTTPRequestHandler):
             command = str(payload.get("command", ""))
             note_id = str(payload.get("note_id", ""))
             strategy = str(payload.get("strategy", "auto"))
-            if command != "open_note" or not note_id:
+            if command not in ("open_note", "fetch_note") or not note_id:
                 self._json_response(
                     HTTPStatus.BAD_REQUEST,
-                    {"ok": False, "error": "expected open_note and note_id"},
+                    {
+                        "ok": False,
+                        "error": "expected open_note/fetch_note and note_id",
+                    },
                 )
                 return
             command_payload = {

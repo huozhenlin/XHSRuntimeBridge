@@ -120,3 +120,29 @@ logger_error
 `NSUserDefaults`。
 
 更安全的长期方案是 HTTPS；明文 HTTP 仅建议用于可信隔离局域网中的短期调试。
+
+## Active fetch without opening the UI
+
+Use `fetch_note` when the goal is to make the app request a note with its own
+logged-in session and push a bounded response snapshot to `POST /events`,
+without navigating to the detail page:
+
+```powershell
+$body = @{
+  command = "fetch_note"
+  note_id = "6ae4132f000000000300bbb2"
+  request_id = "fetch-001"
+  strategy = "fetch_only"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://127.0.0.1:8901/commands/enqueue" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+Watch for `note_detail_request_started`, `note_detail_network_result`, and
+`note_detail_fetch_completed`. `open_note` keeps the original behavior: fetch,
+then attempt to open the detail page. Sensitive session fields are not intended
+to be collected.
