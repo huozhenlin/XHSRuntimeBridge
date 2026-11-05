@@ -591,8 +591,8 @@ static id NDMDeepSnapshot(
         return values;
     }
     BOOL dictionaryLike = [object isKindOfClass:NSDictionary.class] ||
-        [object respondsToSelector:@selector(allKeys)] &&
-        [object respondsToSelector:@selector(objectForKey:)];
+        ([object respondsToSelector:@selector(allKeys)] &&
+         [object respondsToSelector:@selector(objectForKey:)]);
     if (dictionaryLike) {
         NSMutableDictionary *values = [NSMutableDictionary dictionary];
         NSUInteger count = 0;
