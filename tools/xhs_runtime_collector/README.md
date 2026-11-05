@@ -75,6 +75,7 @@ $body = @{
   command = "open_note"
   note_id = "6ae4132f000000000300bbb2"
   request_id = "manual-001"
+  strategy = "auto"
 } | ConvertTo-Json
 
 Invoke-RestMethod `

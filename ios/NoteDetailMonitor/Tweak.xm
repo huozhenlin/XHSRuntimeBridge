@@ -581,12 +581,16 @@ static void NDMExecuteCommand(NSDictionary *command) {
     NSString *name = command[@"command"];
     NSString *requestID = command[@"request_id"];
     NSString *noteID = command[@"note_id"];
+    NSString *strategy = command[@"strategy"] ?: @"auto";
     if (![name isEqualToString:@"open_note"] || noteID.length == 0) {
         return;
     }
 
     SEL selector = gRouteSelector ?: @selector(openNoteDetailWithNoteID:);
-    id route = gLastRouteObject;
+    id route = ([strategy isEqualToString:@"tracker"] ||
+                [strategy isEqualToString:@"auto"])
+        ? gLastRouteObject
+        : nil;
     if (!route || ![route respondsToSelector:selector]) {
         Class knownRouter = NSClassFromString(
             @"XYPKPostNotesProgressTracker"
@@ -618,6 +622,7 @@ static void NDMExecuteCommand(NSDictionary *command) {
         @"event": @"open_note_requested",
         @"request_id": requestID ?: @"",
         @"note_id": noteID,
+        @"strategy": strategy,
         @"route_class": NSStringFromClass(
             object_isClass(route) ? (Class)route : object_getClass(route)
         ) ?: @""

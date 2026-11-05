@@ -218,6 +218,7 @@ class CollectorHandler(BaseHTTPRequestHandler):
                 return
             command = str(payload.get("command", ""))
             note_id = str(payload.get("note_id", ""))
+            strategy = str(payload.get("strategy", "auto"))
             if command != "open_note" or not note_id:
                 self._json_response(
                     HTTPStatus.BAD_REQUEST,
@@ -227,6 +228,7 @@ class CollectorHandler(BaseHTTPRequestHandler):
             command_payload = {
                 "command": command,
                 "note_id": note_id,
+                "strategy": strategy,
                 "request_id": str(
                     payload.get("request_id")
                     or f"req-{int(datetime.now().timestamp() * 1000)}"
