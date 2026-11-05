@@ -633,24 +633,6 @@ static void XRBInstallBusinessHooks(void) {
         @[@"_TtC12XYNoteModule24NoteDetailViewController", @"setNoteModel:"],
         @[@"_TtC12XYNoteModule24NoteDetailViewController", @"setNoteDetail:"],
         @[@"_TtC12XYNoteModule24NoteDetailViewController", @"setNoteDetailModel:"],
-        @[@"XHSVideoDownloadSources", @"downloadVideo:"],
-        @[@"XHSVideoDownloadSources", @"Xdownload:"],
-        @[@"XHSVideoDownloadSources", @"Xdownload:preferredName:"],
-        @[@"XHSVideoDownloadSources", @"XdownloadAllPhotos:"],
-        @[@"XHSPhotoAlbumManager", @"saveImageWithUrl:authorId:"],
-        @[@"XHSPhotoAlbumManager", @"saveVideoWithURL:context:preferredName:"],
-        @[@"XHSPhotoAlbumManager", @"saveImageAtFileURL:preferredName:completion:"],
-        @[@"XHSPhotoAlbumManager", @"saveVideoAtFileURL:preferredName:completion:"],
-        @[@"XHSPhotoAlbumManager", @"setImages:"],
-        @[@"XHSPhotoAlbumManager", @"setImagesList:"],
-        @[@"XHSPhotoAlbumManager", @"setModel:"],
-        @[@"XHSPhotoAlbumManager", @"setViewModel:"],
-        @[@"XHSVideoDownloadSources", @"setImages:"],
-        @[@"XHSVideoDownloadSources", @"setImagesList:"],
-        @[@"XHSVideoDownloadSources", @"setModel:"],
-        @[@"XHSVideoDownloadSources", @"setViewModel:"],
-        @[@"XHSVideoDownloadJob", @"setModel:"],
-        @[@"XHSVideoDownloadJob", @"setViewModel:"]
     ];
     for (NSArray<NSString *> *target in targets) {
         XRBInstallBusinessHook(target[0], target[1]);
