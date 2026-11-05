@@ -271,6 +271,24 @@ static void NDMReportController(
 
     NSDictionary *controllerFields = NDMExtractBusinessFields(controller);
     [event addEntriesFromDictionary:controllerFields];
+
+    for (NSString *modelKey in @[
+        @"note", @"noteModel", @"contentNoteModel", @"noteFeed", @"feed"
+    ]) {
+        id model = NDMReadKnownValue(controller, modelKey);
+        if (!model) continue;
+        NSDictionary *modelFields = NDMExtractBusinessFields(model);
+        for (NSString *key in @[@"note_id", @"user_id", @"source", @"feed_id"]) {
+            id value = modelFields[key];
+            if (value && value != [NSNull null] && ![event[key] isEqual:value]) {
+                if (!event[key] || event[key] == [NSNull null]) {
+                    event[key] = value;
+                }
+            }
+        }
+        event[@"model_class"] = NSStringFromClass(object_getClass(model));
+        break;
+    }
     NDMPostEvent(event);
 }
 
