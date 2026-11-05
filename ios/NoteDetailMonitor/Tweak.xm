@@ -346,12 +346,29 @@ static void NDMReportController(
 static void NDMRouteObserved(id self, SEL selector, NSString *noteID) {
     gLastRouteObject = self;
     gRouteSelector = selector;
+    Class runtimeClass = object_isClass(self)
+        ? (Class)self
+        : object_getClass(self);
     NDMPostEvent(@{
         @"event": @"note_route_observed",
-        @"class": NSStringFromClass(object_getClass(self)) ?: @"",
+        @"class": NSStringFromClass(runtimeClass) ?: @"",
         @"selector": NSStringFromSelector(selector) ?: @"",
         @"note_id": noteID ?: [NSNull null]
     });
+}
+
+static Method NDMDirectMethod(Class cls, SEL selector) {
+    unsigned int count = 0;
+    Method *methods = class_copyMethodList(cls, &count);
+    Method result = NULL;
+    for (unsigned int index = 0; index < count; index++) {
+        if (method_getName(methods[index]) == selector) {
+            result = methods[index];
+            break;
+        }
+    }
+    free(methods);
+    return result;
 }
 
 static void NDMRouteHookVoid(id self, SEL selector, id noteID) {
@@ -370,6 +387,71 @@ static id NDMRouteHookObject(id self, SEL selector, id noteID) {
 static void NDMInstallRouteHook(void) {
     if (gRouteOriginal) return;
     SEL selector = @selector(openNoteDetailWithNoteID:);
+    NSMutableArray<NSString *> *foundClasses = [NSMutableArray array];
+
+    NSArray<NSString *> *preferredClasses = @[
+        @"XYPKPostNotesProgressTracker",
+        @"XYNoteDetailRouter",
+        @"XYNoteDetailServiceImp"
+    ];
+
+    for (NSString *className in preferredClasses) {
+        Class cls = NSClassFromString(className);
+        if (!cls) continue;
+        Class owner = cls;
+        NSString *ownerKind = @"instance";
+        Method method = NDMDirectMethod(owner, selector);
+        if (!method) {
+            owner = object_getClass(cls);
+            ownerKind = @"class";
+            method = NDMDirectMethod(owner, selector);
+        }
+        if (!method) continue;
+        [foundClasses addObject:className];
+
+        const char *encoding = method_getTypeEncoding(method);
+        IMP replacement = NULL;
+        if (strcmp(encoding, "v24@0:8@16") == 0) {
+            replacement = (IMP)NDMRouteHookVoid;
+            gRouteReturnsObject = NO;
+        } else if (strcmp(encoding, "@24@0:8@16") == 0) {
+            replacement = (IMP)NDMRouteHookObject;
+            gRouteReturnsObject = YES;
+        } else {
+            NDMPostEvent(@{
+                @"event": @"route_hook_unsupported",
+                @"class": className,
+                @"selector": NSStringFromSelector(selector),
+                @"type_encoding": encoding
+                    ? [NSString stringWithUTF8String:encoding]
+                    : @""
+            });
+            continue;
+        }
+
+        if (!NDMDirectMethod(owner, selector)) {
+            class_addMethod(
+                owner,
+                selector,
+                method_getImplementation(method),
+                encoding
+            );
+            method = class_getInstanceMethod(owner, selector);
+        }
+        gRouteOriginal = method_setImplementation(method, replacement);
+        gRouteSelector = selector;
+        NDMPostEvent(@{
+            @"event": @"route_hook_installed",
+            @"class": className,
+            @"owner_kind": ownerKind,
+            @"selector": NSStringFromSelector(selector),
+            @"type_encoding": encoding
+                ? [NSString stringWithUTF8String:encoding]
+                : @""
+        });
+        return;
+    }
+
     int count = objc_getClassList(NULL, 0);
     if (count <= 0) return;
 
@@ -423,6 +505,10 @@ static void NDMInstallRouteHook(void) {
         free(methods);
     }
     free(classes);
+    NDMPostEvent(@{
+        @"event": @"route_scan_completed",
+        @"candidate_classes": foundClasses
+    });
 }
 
 static NSURL *NDMCommandURL(void) {
