@@ -745,6 +745,7 @@ static NSURL *NDMCommandURL(void) {
 }
 
 static void NDMStartCommandPoll(void);
+static BOOL NDMRouteNoteModel(id model, NSString *requestID);
 
 static id NDMFindModelInResponse(id response) {
     if (!response) return nil;
