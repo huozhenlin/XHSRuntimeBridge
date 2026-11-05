@@ -533,9 +533,25 @@ static void NDMExecuteCommand(NSDictionary *command) {
         return;
     }
 
-    if (!gLastRouteObject ||
-        !gRouteSelector ||
-        ![gLastRouteObject respondsToSelector:gRouteSelector]) {
+    SEL selector = gRouteSelector ?: @selector(openNoteDetailWithNoteID:);
+    id route = gLastRouteObject;
+    if (!route || ![route respondsToSelector:selector]) {
+        Class knownRouter = NSClassFromString(
+            @"XYPKPostNotesProgressTracker"
+        );
+        if (knownRouter && [knownRouter respondsToSelector:selector]) {
+            route = knownRouter;
+            gRouteSelector = selector;
+            gRouteReturnsObject = NO;
+            NDMPostEvent(@{
+                @"event": @"route_fallback_class",
+                @"class": NSStringFromClass(knownRouter),
+                @"selector": NSStringFromSelector(selector)
+            });
+        }
+    }
+
+    if (!route || ![route respondsToSelector:selector]) {
         NDMPostEvent(@{
             @"event": @"open_note_failed",
             @"request_id": requestID ?: @"",
@@ -551,12 +567,10 @@ static void NDMExecuteCommand(NSDictionary *command) {
         @"request_id": requestID ?: @"",
         @"note_id": noteID,
         @"route_class": NSStringFromClass(
-            object_getClass(gLastRouteObject)
+            object_isClass(route) ? (Class)route : object_getClass(route)
         ) ?: @""
     });
 
-    id route = gLastRouteObject;
-    SEL selector = gRouteSelector;
     BOOL returnsObject = gRouteReturnsObject;
     dispatch_async(dispatch_get_main_queue(), ^{
         if (returnsObject) {
