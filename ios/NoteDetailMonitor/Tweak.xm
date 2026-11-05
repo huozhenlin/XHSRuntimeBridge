@@ -249,6 +249,25 @@ static NSString *NDMControllerName(UIViewController *controller) {
     return controller ? NSStringFromClass(controller.class) : @"";
 }
 
+static NSArray<NSString *> *NDMCallStack(void) {
+    NSArray<NSString *> *symbols = NSThread.callStackSymbols;
+    NSUInteger count = MIN((NSUInteger)20, symbols.count);
+    return count > 0 ? [symbols subarrayWithRange:NSMakeRange(0, count)] : @[];
+}
+
+static NSArray<NSString *> *NDMDictionaryKeys(id value) {
+    if (![value isKindOfClass:NSDictionary.class]) return @[];
+    NSMutableArray<NSString *> *keys = [NSMutableArray array];
+    for (id key in [(NSDictionary *)value allKeys]) {
+        NSString *text = [key description] ?: @"";
+        if (!NDMIsSensitiveKey(text) && text.length > 0) {
+            [keys addObject:text];
+        }
+    }
+    [keys sortUsingSelector:@selector(compare:)];
+    return keys;
+}
+
 static BOOL NDMLooksLikeDetailController(UIViewController *controller) {
     NSString *name = NDMControllerName(controller).lowercaseString;
     return [name containsString:@"notedetail"] ||
@@ -268,12 +287,21 @@ static void NDMReportController(
         @"event": @"note_detail_candidate",
         @"navigation": navigationKind ?: @"",
         @"controller": NDMControllerName(controller),
-        @"superclass": NSStringFromClass(class_getSuperclass(controllerClass)) ?: @""
+        @"superclass": NSStringFromClass(class_getSuperclass(controllerClass)) ?: @"",
+        @"call_stack": NDMCallStack()
     }];
     if (routeFields) [event addEntriesFromDictionary:routeFields];
 
     NSDictionary *controllerFields = NDMExtractBusinessFields(controller);
     [event addEntriesFromDictionary:controllerFields];
+    for (NSString *routeKey in @[@"routerParams", @"routeParams"]) {
+        id routeParams = NDMReadKnownValue(controller, routeKey);
+        NSArray<NSString *> *keys = NDMDictionaryKeys(routeParams);
+        if (keys.count > 0) {
+            event[@"route_param_keys"] = keys;
+            break;
+        }
+    }
 
     for (NSString *modelKey in @[
         @"note", @"noteModel", @"contentNoteModel", @"noteFeed", @"feed"
