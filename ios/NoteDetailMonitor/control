@@ -1,0 +1,9 @@
+Package: com.huozhenlin.notedetailmonitor
+Name: NoteDetailMonitor
+Version: 0.1.0
+Architecture: iphoneos-arm64
+Description: Runtime note detail navigation and parameter monitor
+Maintainer: huozhenlin
+Author: huozhenlin
+Section: Tweaks
+Depends: mobilesubstrate
