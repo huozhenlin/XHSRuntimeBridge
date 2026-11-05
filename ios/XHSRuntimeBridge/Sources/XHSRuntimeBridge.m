@@ -647,6 +647,17 @@ static void XRBInstallBusinessHooks(void) {
     }
 }
 
+static void XRBRescanBusinessHooks(void) {
+    XRBInstallBusinessHooks();
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
+        dispatch_get_global_queue(QOS_CLASS_UTILITY, 0),
+        ^{
+            XRBRescanBusinessHooks();
+        }
+    );
+}
+
 @interface NSURLSession (XHSRuntimeBridge)
 
 - (NSURLSessionDataTask *)xrb_dataTaskWithRequest:(NSURLRequest *)request
@@ -802,6 +813,7 @@ static void XHSRuntimeBridgeInitialize(void) {
                 ^{
                     XRBScanRuntime();
                     XRBInstallBusinessHooks();
+                    XRBRescanBusinessHooks();
                     XRBLogEvent(@"runtime_scan_completed", nil);
                 }
             );
