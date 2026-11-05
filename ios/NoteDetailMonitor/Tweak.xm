@@ -379,7 +379,10 @@ static void NDMScanRouteCandidates(void) {
         @"transitionToNoteDetailWithNote:",
         @"routeToNoteDetailWithItem:atIndexPath:channel:anchorIndex:isDynamicCover:",
         @"routeToNoteDetailsWith:title:note:extraSkuInfos:",
-        @"presentNoteDetailWithConfig:saveActionHandler:saveActionTrackHandler:shareToFriendResult:delegate:"
+        @"presentNoteDetailWithConfig:saveActionHandler:saveActionTrackHandler:shareToFriendResult:delegate:",
+        @"fetchNoteDetailWithNoteId:",
+        @"makeFetchNoteDetailAPI:",
+        @"requestWithWsrurl:keyPath:customContent:completion:"
     ];
 
     int count = objc_getClassList(NULL, 0);
