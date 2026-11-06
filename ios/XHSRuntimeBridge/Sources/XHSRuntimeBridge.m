@@ -545,6 +545,56 @@ static void XRBHookObjectCompletion(
     }
 }
 
+static void XRBHookCompletionOnly(
+    id self,
+    SEL selector,
+    id completion
+) {
+    XRBLogBusinessEnter(self, selector, @{
+        @"completion_class": completion
+            ? NSStringFromClass(object_getClass(completion))
+            : @"<nil>"
+    });
+    IMP original = XRBOriginalImplementation(self, selector);
+    if (!original) return;
+
+    void (^wrappedCompletion)(id, id) = ^(id result, id error) {
+        NSMutableDictionary *summary = [NSMutableDictionary
+            dictionaryWithDictionary:XRBModelSummary(result)];
+        summary[@"class"] = NSStringFromClass(object_getClass(self)) ?: @"";
+        summary[@"selector"] = NSStringFromSelector(selector) ?: @"";
+        summary[@"result_class"] = result
+            ? NSStringFromClass(object_getClass(result))
+            : @"<nil>";
+        summary[@"error_class"] = error
+            ? NSStringFromClass(object_getClass(error))
+            : @"<nil>";
+        XRBLogEvent(@"business_completion", summary);
+
+        if (result) {
+            NSMutableSet<NSValue *> *seen = [NSMutableSet set];
+            NSUInteger budget = 600;
+            XRBLogEvent(@"note_model_completion_dump", @{
+                @"class": NSStringFromClass(object_getClass(self)) ?: @"",
+                @"selector": NSStringFromSelector(selector) ?: @"",
+                @"model_class": NSStringFromClass(object_getClass(result))
+                    ?: @"",
+                @"snapshot": XRBDeepSnapshot(
+                    result, 0, seen, &budget
+                ) ?: [NSNull null],
+                @"remaining_budget": @(budget)
+            });
+        }
+
+        if (completion) {
+            ((void (^)(id, id))completion)(result, error);
+        }
+    };
+    ((void (*)(id, SEL, id))original)(
+        self, selector, wrappedCompletion
+    );
+}
+
 static Method XRBDirectMethod(Class cls, SEL selector) {
     unsigned int count = 0;
     Method *methods = class_copyMethodList(cls, &count);
@@ -600,6 +650,9 @@ static void XRBInstallBusinessHook(
     } else if (strcmp(encoding, "v32@0:8@16@?24") == 0) {
         replacement = (IMP)XRBHookObjectCompletion;
         kind = @"void_object_completion";
+    } else if (strcmp(encoding, "v24@0:8@?16") == 0) {
+        replacement = (IMP)XRBHookCompletionOnly;
+        kind = @"void_completion";
     } else {
         XRBLogEvent(@"business_hook_unsupported", @{
             @"class": className,
