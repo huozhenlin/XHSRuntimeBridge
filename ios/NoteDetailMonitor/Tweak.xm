@@ -18,6 +18,7 @@ static SEL gRouteSelector;
 static IMP gRouteOriginal;
 static BOOL gRouteReturnsObject;
 static NSString *gPendingRequestID;
+static NSString *gPendingNoteID;
 static IMP gShoppingRouteOriginal;
 static IMP gHomeFeedRouteOriginal;
 static IMP gCommercialWSROriginal;
@@ -356,6 +357,24 @@ static NSArray<NSString *> *NDMCallStack(void) {
     NSArray<NSString *> *symbols = NSThread.callStackSymbols;
     NSUInteger count = MIN((NSUInteger)20, symbols.count);
     return count > 0 ? [symbols subarrayWithRange:NSMakeRange(0, count)] : @[];
+}
+
+static NSDictionary *NDMTraceContext(id object) {
+    NSMutableDictionary *context = [NSMutableDictionary dictionary];
+    if (gPendingRequestID.length > 0) {
+        context[@"request_id"] = gPendingRequestID;
+    }
+    NSString *noteID = gPendingNoteID;
+    if (noteID.length == 0 && object) {
+        id value = NDMReadKnownValue(object, @"noteId");
+        if ([value isKindOfClass:NSString.class]) {
+            noteID = value;
+        }
+    }
+    if (noteID.length > 0) {
+        context[@"note_id_context"] = noteID;
+    }
+    return context;
 }
 
 static NSArray<NSString *> *NDMDictionaryKeys(id value) {
@@ -907,7 +926,7 @@ static id NDMObserveDetailGetter(
 ) {
     if (!original) return nil;
     id result = ((id (*)(id, SEL))original)(self, selector);
-    NDMPostEvent(@{
+    NSMutableDictionary *event = [NSMutableDictionary dictionaryWithDictionary:@{
         @"event": @"detail_viewmodel_observed",
         @"property": NSStringFromSelector(selector) ?: @"",
         @"model_class": result
@@ -915,7 +934,9 @@ static id NDMObserveDetailGetter(
             : @"<nil>",
         @"fields": NDMExtractBusinessFields(result),
         @"call_stack": NDMCallStack()
-    });
+    }];
+    [event addEntriesFromDictionary:NDMTraceContext(self)];
+    NDMPostEvent(event);
     return result;
 }
 
@@ -946,6 +967,7 @@ static void NDMObserveDetailSetter(
         @"fields": NDMExtractBusinessFields(value),
         @"call_stack": NDMCallStack()
     }];
+    [event addEntriesFromDictionary:NDMTraceContext(self)];
     if (value) {
         NSUInteger budget = 300;
         event[@"snapshot"] = NDMDeepSnapshot(
@@ -1599,6 +1621,10 @@ static void NDMExecuteCommand(NSDictionary *command) {
 
     BOOL fetchOnly = [name isEqualToString:@"fetch_note"] ||
         [strategy isEqualToString:@"fetch_only"];
+    if (requestID.length > 0) {
+        gPendingRequestID = requestID;
+        gPendingNoteID = noteID;
+    }
     if (!fetchOnly &&
         ([strategy isEqualToString:@"deep_link"] ||
          [strategy isEqualToString:@"url_scheme"] ||
