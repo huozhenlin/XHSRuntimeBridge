@@ -40,7 +40,30 @@ static NSArray<NSString *> *XRBInterestingSelectors(void) {
         @"setVideoURL:",
         @"setVideoURLs:",
         @"setNote:",
-        @"setViewModel:"
+        @"setViewModel:",
+        @"note_data",
+        @"media_data",
+        @"cur_position",
+        @"context",
+        @"scene",
+        @"original_url",
+        @"url",
+        @"media_type",
+        @"uniqueId",
+        @"browserItemUrl",
+        @"browserItemOriginUrl",
+        @"browserItemFileId",
+        @"livePhotoVideoPath",
+        @"image",
+        @"video",
+        @"imageData",
+        @"videoData",
+        @"videoDataInfo",
+        @"videoUrl",
+        @"identifier",
+        @"cellViewModelList",
+        @"downloadButtonTapped:",
+        @"mediaBrowserViewModelDidClickDownloadButtonAtIndex:index:"
     ];
 }
 
@@ -449,6 +472,47 @@ static NSDictionary *XRBModelSummary(id model) {
     return result;
 }
 
+static NSDictionary *XRBMediaFieldSummary(id value) {
+    if (!value) return @{};
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    for (NSArray<NSString *> *field in @[
+        @[@"id", @"id"],
+        @[@"noteId", @"note_id"],
+        @[@"original_url", @"original_url"],
+        @[@"originalUrl", @"original_url"],
+        @[@"url", @"url"],
+        @[@"browserItemUrl", @"browser_item_url"],
+        @[@"browserItemOriginUrl", @"browser_item_origin_url"],
+        @[@"browserItemFileId", @"browser_item_file_id"],
+        @[@"media_type", @"media_type"],
+        @[@"mediaType", @"media_type"],
+        @[@"uniqueId", @"unique_id"],
+        @[@"image", @"image"],
+        @[@"video", @"video"],
+        @[@"videoUrl", @"video_url"],
+        @[@"identifier", @"identifier"],
+        @[@"imageData", @"image_data"],
+        @[@"videoData", @"video_data"],
+        @[@"videoDataInfo", @"video_data_info"],
+        @[@"isVideo", @"is_video"],
+        @[@"isLivePhoto", @"is_live_photo"],
+        @[@"width", @"width"],
+        @[@"height", @"height"]
+    ]) {
+        id fieldValue = XRBReadField(value, field[0]);
+        if (!fieldValue) continue;
+        if ([fieldValue isKindOfClass:NSString.class] ||
+            [fieldValue isKindOfClass:NSNumber.class] ||
+            [fieldValue isKindOfClass:NSURL.class]) {
+            result[field[1]] = [fieldValue isKindOfClass:NSURL.class]
+                ? [(NSURL *)fieldValue absoluteString]
+                : fieldValue;
+        }
+    }
+    result[@"class"] = NSStringFromClass(object_getClass(value)) ?: @"";
+    return result;
+}
+
 static NSArray<NSString *> *XRBCallStack(void) {
     NSArray<NSString *> *symbols = NSThread.callStackSymbols;
     NSUInteger count = MIN((NSUInteger)16, symbols.count);
@@ -585,6 +649,31 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
     if (!original) return nil;
     id result = ((id (*)(id, SEL))original)(self, selector);
     NSString *selectorName = NSStringFromSelector(selector);
+    NSSet<NSString *> *mediaSelectors = [NSSet setWithArray:@[
+        @"note_data", @"media_data", @"cur_position", @"context", @"scene",
+        @"original_url", @"url", @"media_type", @"uniqueId",
+        @"browserItemUrl", @"browserItemOriginUrl", @"browserItemFileId",
+        @"livePhotoVideoPath", @"image", @"video", @"imageData",
+        @"videoData", @"videoDataInfo", @"videoUrl", @"identifier",
+        @"cellViewModelList"
+    ]];
+    if ([mediaSelectors containsObject:selectorName]) {
+        NSMutableDictionary *media = [NSMutableDictionary
+            dictionaryWithDictionary:XRBMediaFieldSummary(result)];
+        media[@"event"] = @"media_field_received";
+        media[@"selector"] = selectorName ?: @"";
+        media[@"owner_class"] = NSStringFromClass(object_getClass(self))
+            ?: @"";
+        if (result) {
+            NSMutableSet<NSValue *> *seen = [NSMutableSet set];
+            NSUInteger budget = 600;
+            media[@"snapshot"] = XRBDeepSnapshot(
+                result, 0, seen, &budget
+            ) ?: [NSNull null];
+            media[@"remaining_budget"] = @(budget);
+        }
+        XRBLogEvent(@"media_field_received", media);
+    }
     if ([selectorName isEqualToString:@"contentNoteModel"] ||
         [selectorName isEqualToString:@"imagesList"] ||
         [selectorName isEqualToString:@"videoURLs"] ||
@@ -1169,7 +1258,8 @@ static BOOL XRBShouldScanMediaClass(Class cls) {
     }
     for (NSString *term in @[
         @"XY", @"Note", @"Feed", @"Video", @"Image", @"Content",
-        @"Detail", @"Shopping", @"WorldSnake", @"Commercial"
+        @"Detail", @"Shopping", @"WorldSnake", @"Commercial",
+        @"Media", @"Browser", @"Photo"
     ]) {
         if ([name containsString:term]) return YES;
     }
@@ -1188,7 +1278,13 @@ static void XRBInstallMediaFieldHooks(void) {
         @"setVideoURL:",
         @"setVideoURLs:",
         @"setNote:",
-        @"setViewModel:"
+        @"setViewModel:",
+        @"note_data", @"media_data", @"cur_position", @"context", @"scene",
+        @"original_url", @"url", @"media_type", @"uniqueId",
+        @"browserItemUrl", @"browserItemOriginUrl", @"browserItemFileId",
+        @"livePhotoVideoPath", @"image", @"video", @"imageData",
+        @"videoData", @"videoDataInfo", @"videoUrl", @"identifier",
+        @"cellViewModelList"
     ];
     int count = objc_getClassList(NULL, 0);
     if (count <= 0) return;
