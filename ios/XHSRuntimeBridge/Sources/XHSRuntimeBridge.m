@@ -41,6 +41,16 @@ static NSArray<NSString *> *XRBInterestingSelectors(void) {
         @"setVideoURLs:",
         @"setNote:",
         @"setViewModel:",
+        @"noteId",
+        @"noteID",
+        @"userId",
+        @"userID",
+        @"title",
+        @"desc",
+        @"likedCount",
+        @"commentsCount",
+        @"collectedCount",
+        @"shareCount",
         @"note_data",
         @"media_data",
         @"cur_position",
@@ -698,6 +708,8 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
         @"browserItemURL", @"browserItemOriginURL", @"browserItemFileID",
         @"imageURL", @"photoURL", @"largeImageURL",
         @"videoData", @"videoDataInfo", @"videoUrl", @"identifier",
+        @"noteId", @"noteID", @"userId", @"userID", @"title", @"desc",
+        @"likedCount", @"commentsCount", @"collectedCount", @"shareCount",
         @"cellViewModelList",
         @"downloadButtonTapped:",
         @"mediaBrowserViewModelDidClickDownloadButtonAtIndex:index:"
@@ -718,6 +730,23 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
             media[@"remaining_budget"] = @(budget);
         }
         XRBLogEvent(@"media_field_received", media);
+    }
+    NSSet<NSString *> *noteFieldSelectors = [NSSet setWithArray:@[
+        @"noteId", @"noteID", @"userId", @"userID", @"title", @"desc",
+        @"likedCount", @"commentsCount", @"collectedCount", @"shareCount"
+    ]];
+    if ([noteFieldSelectors containsObject:selectorName]) {
+        NSMutableDictionary *field = [NSMutableDictionary dictionaryWithDictionary:
+            XRBMediaFieldSummary(result)];
+        field[@"event"] = @"note_field_received";
+        field[@"selector"] = selectorName ?: @"";
+        field[@"owner_class"] = NSStringFromClass(object_getClass(self))
+            ?: @"";
+        if ([result isKindOfClass:NSString.class] ||
+            [result isKindOfClass:NSNumber.class]) {
+            field[@"value"] = result;
+        }
+        XRBLogEvent(@"note_field_received", field);
     }
     if ([selectorName isEqualToString:@"contentNoteModel"] ||
         [selectorName isEqualToString:@"imagesList"] ||
@@ -1354,6 +1383,8 @@ static void XRBInstallMediaFieldHooks(void) {
         @"browserItemURL", @"browserItemOriginURL", @"browserItemFileID",
         @"imageURL", @"photoURL", @"largeImageURL",
         @"videoData", @"videoDataInfo", @"videoUrl", @"identifier",
+        @"noteId", @"noteID", @"userId", @"userID", @"title", @"desc",
+        @"likedCount", @"commentsCount", @"collectedCount", @"shareCount",
         @"cellViewModelList",
         @"downloadButtonTapped:",
         @"mediaBrowserViewModelDidClickDownloadButtonAtIndex:index:"
