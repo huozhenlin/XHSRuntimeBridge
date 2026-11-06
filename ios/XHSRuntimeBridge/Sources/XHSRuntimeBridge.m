@@ -1251,17 +1251,24 @@ static void XRBInstallBusinessHooks(void) {
 static BOOL XRBShouldScanMediaClass(Class cls) {
     NSString *name = NSStringFromClass(cls) ?: @"";
     if (name.length == 0 || [name hasPrefix:@"XHS"]) return NO;
-    for (NSString *prefix in @[
-        @"NS", @"UI", @"CF", @"AF", @"NSURL", @"_NS", @"__NS"
-    ]) {
-        if ([name hasPrefix:prefix]) return NO;
-    }
-    for (NSString *term in @[
-        @"XY", @"Note", @"Feed", @"Video", @"Image", @"Content",
-        @"Detail", @"Shopping", @"WorldSnake", @"Commercial",
-        @"Media", @"Browser", @"Photo"
-    ]) {
-        if ([name containsString:term]) return YES;
+    NSArray<NSString *> *exactOrScopedNames = @[
+        @"MediaBrowserBridgeInputParams",
+        @"MediaBrowserNoteInfo",
+        @"MediaBrowserItemInfo",
+        @"XYMediaModel",
+        @"XYMediaBrowser",
+        @"XYMediaBrowserViewModel",
+        @"XYPBPhotoBrowser",
+        @"XYPKPostModel",
+        @"XYPKVideoSegmentModel",
+        @"XYPKRouteBusinessImageInfo",
+        @"XYPKPreDownloadResourceModel"
+    ];
+    for (NSString *candidate in exactOrScopedNames) {
+        if ([name isEqualToString:candidate] ||
+            [name containsString:candidate]) {
+            return YES;
+        }
     }
     return NO;
 }
