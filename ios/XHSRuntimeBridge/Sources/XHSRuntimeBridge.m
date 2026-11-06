@@ -48,6 +48,8 @@ static NSArray<NSString *> *XRBInterestingSelectors(void) {
         @"viewModel",
         @"contentModel",
         @"setCellViewModelList:",
+        @"modelCustomTransformFromDictionary:",
+        @"modelCustomTransformFromDictionary:",
         @"noteId",
         @"noteID",
         @"userId",
@@ -669,6 +671,66 @@ static void XRBHookVoidObject(id self, SEL selector, id argument) {
     if (original) {
         ((void (*)(id, SEL, id))original)(self, selector, argument);
     }
+}
+
+static BOOL XRBHookBoolObject(id self, SEL selector, id argument) {
+    XRBLogBusinessEnter(self, selector, @{
+        @"argument_class": argument
+            ? NSStringFromClass(object_getClass(argument)) : @"<nil>"
+    });
+    IMP original = XRBOriginalImplementation(self, selector);
+    BOOL result = original
+        ? ((BOOL (*)(id, SEL, id))original)(self, selector, argument)
+        : NO;
+
+    NSMutableDictionary *event = [NSMutableDictionary dictionaryWithDictionary:@{
+        @"event": @"note_model_transform",
+        @"class": NSStringFromClass(object_getClass(self)) ?: @"",
+        @"selector": NSStringFromSelector(selector) ?: @"",
+        @"success": @(result),
+        @"model_fields": XRBModelSummary(self),
+        @"call_stack": XRBCallStack()
+    }];
+    if (argument) {
+        NSMutableSet<NSValue *> *seen = [NSMutableSet set];
+        NSUInteger budget = 500;
+        event[@"input_snapshot"] = XRBDeepSnapshot(
+            argument, 0, seen, &budget
+        ) ?: [NSNull null];
+        event[@"remaining_budget"] = @(budget);
+    }
+    XRBLogEvent(@"note_model_transform", event);
+    return result;
+}
+
+static BOOL XRBHookBoolObject(id self, SEL selector, id argument) {
+    XRBLogBusinessEnter(self, selector, @{
+        @"argument_class": argument
+            ? NSStringFromClass(object_getClass(argument)) : @"<nil>"
+    });
+    IMP original = XRBOriginalImplementation(self, selector);
+    BOOL result = original
+        ? ((BOOL (*)(id, SEL, id))original)(self, selector, argument)
+        : NO;
+
+    NSMutableDictionary *event = [NSMutableDictionary dictionaryWithDictionary:@{
+        @"event": @"note_model_transform",
+        @"class": NSStringFromClass(object_getClass(self)) ?: @"",
+        @"selector": NSStringFromSelector(selector) ?: @"",
+        @"success": @(result),
+        @"model_fields": XRBModelSummary(self),
+        @"call_stack": XRBCallStack()
+    }];
+    if (argument) {
+        NSMutableSet<NSValue *> *seen = [NSMutableSet set];
+        NSUInteger budget = 500;
+        event[@"input_snapshot"] = XRBDeepSnapshot(
+            argument, 0, seen, &budget
+        ) ?: [NSNull null];
+        event[@"remaining_budget"] = @(budget);
+    }
+    XRBLogEvent(@"note_model_transform", event);
+    return result;
 }
 
 static void XRBHookVoidObjectLong(
@@ -1313,6 +1375,12 @@ static void XRBInstallBusinessHook(
     if (strcmp(encoding, "v24@0:8@16") == 0) {
         replacement = (IMP)XRBHookVoidObject;
         kind = @"void_object";
+    } else if (strcmp(encoding, "B24@0:8@16") == 0) {
+        replacement = (IMP)XRBHookBoolObject;
+        kind = @"bool_object";
+    } else if (strcmp(encoding, "B24@0:8@16") == 0) {
+        replacement = (IMP)XRBHookBoolObject;
+        kind = @"bool_object";
     } else if (strcmp(encoding, "@24@0:8@16") == 0) {
         replacement = (IMP)XRBHookObjectObject;
         kind = @"object_object";
@@ -1372,6 +1440,8 @@ static void XRBInstallBusinessHooks(void) {
         @[@"XYVFVideoContentDataSource", @"requestNoteDetailWithCompletion:"],
         @[@"XYVFVideoContentViewModel", @"setContentNoteModel:"],
         @[@"XYVTPlayerConfigModel", @"setContentNoteModel:"],
+        @[@"XYPHBaseNote", @"modelCustomTransformFromDictionary:"],
+        @[@"XYPHBaseNote", @"modelCustomTransformFromDictionary:"],
         @[@"XYPKPostModel", @"noteId"],
         @[@"XYPKPostModel", @"userId"],
         @[@"XYPKPostModel", @"title"],
