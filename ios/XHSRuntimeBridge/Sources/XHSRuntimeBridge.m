@@ -795,11 +795,128 @@ static void XRBHookURLSessionDidComplete(
     }
 }
 
+static void XRBHookURLSessionDidReceiveResponse(
+    id self,
+    SEL selector,
+    id session,
+    id task,
+    NSURLResponse *response,
+    void (^completion)(NSInteger)
+) {
+    NSURL *URL = XRBTaskURL(task);
+    if (URL && XRBIsLikelyNoteRequest(URL)) {
+        XRBLogEvent(@"note_detail_response_headers", @{
+            @"url_scheme": URL.scheme ?: @"",
+            @"url_host": URL.host ?: @"",
+            @"url_path": URL.path ?: @"",
+            @"status_code": [response isKindOfClass:NSHTTPURLResponse.class]
+                ? @([(NSHTTPURLResponse *)response statusCode])
+                : @0,
+            @"transport": @"urlsession_delegate"
+        });
+    }
+    IMP original = XRBOriginalImplementation(self, selector);
+    if (original) {
+        ((void (*)(id, SEL, id, id, id, void (^)(NSInteger)))original)(
+            self, selector, session, task, response, completion
+        );
+    }
+}
+
+static void XRBHookURLSessionRedirect(
+    id self,
+    SEL selector,
+    id session,
+    id task,
+    NSURLResponse *response,
+    NSURLRequest *request,
+    void (^completion)(NSURLRequest *)
+) {
+    NSURL *URL = XRBTaskURL(task);
+    if (URL && XRBIsLikelyNoteRequest(URL)) {
+        XRBLogEvent(@"note_detail_redirect", @{
+            @"from_path": URL.path ?: @"",
+            @"to_scheme": request.URL.scheme ?: @"",
+            @"to_host": request.URL.host ?: @"",
+            @"to_path": request.URL.path ?: @"",
+            @"transport": @"urlsession_delegate"
+        });
+    }
+    IMP original = XRBOriginalImplementation(self, selector);
+    if (original) {
+        ((void (*)(id, SEL, id, id, id, id,
+                   void (^)(NSURLRequest *)))original)(
+            self, selector, session, task, response, request, completion
+        );
+    }
+}
+
+static void XRBHookURLSessionDownloadFinished(
+    id self,
+    SEL selector,
+    id session,
+    id task,
+    NSURL *location
+) {
+    NSURL *URL = XRBTaskURL(task);
+    if (URL && XRBIsLikelyNoteRequest(URL)) {
+        NSNumber *size = nil;
+        NSDictionary *attributes =
+            [NSFileManager.defaultManager attributesOfItemAtPath:
+                location.path error:nil];
+        size = attributes[NSFileSize];
+        XRBLogEvent(@"note_detail_download_finished", @{
+            @"url_path": URL.path ?: @"",
+            @"temporary_file_size": size ?: @0,
+            @"transport": @"urlsession_download_delegate"
+        });
+    }
+    IMP original = XRBOriginalImplementation(self, selector);
+    if (original) {
+        ((void (*)(id, SEL, id, id, id))original)(
+            self, selector, session, task, location
+        );
+    }
+}
+
+static void XRBHookURLSessionDownloadComplete(
+    id self,
+    SEL selector,
+    id session,
+    id task,
+    NSError *error
+) {
+    NSURL *URL = XRBTaskURL(task);
+    if (URL && XRBIsLikelyNoteRequest(URL)) {
+        XRBLogEvent(@"note_detail_download_complete", @{
+            @"url_path": URL.path ?: @"",
+            @"success": @(!error),
+            @"error_domain": error.domain ?: @"",
+            @"error_code": error ? @(error.code) : @0,
+            @"transport": @"urlsession_download_delegate"
+        });
+    }
+    IMP original = XRBOriginalImplementation(self, selector);
+    if (original) {
+        ((void (*)(id, SEL, id, id, id))original)(
+            self, selector, session, task, error
+        );
+    }
+}
+
 static void XRBInstallURLSessionDelegateObservation(void) {
     SEL receiveSelector =
         @selector(URLSession:dataTask:didReceiveData:);
     SEL completeSelector =
         @selector(URLSession:task:didCompleteWithError:);
+    SEL responseSelector =
+        @selector(URLSession:dataTask:didReceiveResponse:completionHandler:);
+    SEL redirectSelector =
+        @selector(URLSession:task:willPerformHTTPRedirection:newRequest:completionHandler:);
+    SEL downloadFinishedSelector =
+        @selector(URLSession:downloadTask:didFinishDownloadingToURL:);
+    SEL downloadCompleteSelector =
+        @selector(URLSession:downloadTask:didCompleteWithError:);
     int count = objc_getClassList(NULL, 0);
     if (count <= 0) return;
     Class __unsafe_unretained *classes =
@@ -809,7 +926,14 @@ static void XRBInstallURLSessionDelegateObservation(void) {
     for (int index = 0; index < count; index++) {
         Class cls = classes[index];
         if (!XRBIsAppDelegateClass(cls)) continue;
-        for (SEL selector in @[receiveSelector, completeSelector]) {
+        for (SEL selector in @[
+            receiveSelector,
+            completeSelector,
+            responseSelector,
+            redirectSelector,
+            downloadFinishedSelector,
+            downloadCompleteSelector
+        ]) {
             Method method = XRBDirectMethod(cls, selector);
             if (!method) continue;
 
@@ -834,6 +958,18 @@ static void XRBInstallURLSessionDelegateObservation(void) {
             } else if (selector == completeSelector &&
                        strcmp(encoding, "v32@0:8@16@24@32") == 0) {
                 replacement = (IMP)XRBHookURLSessionDidComplete;
+            } else if (selector == responseSelector &&
+                       strcmp(encoding, "v40@0:8@16@24@32") == 0) {
+                replacement = (IMP)XRBHookURLSessionDidReceiveResponse;
+            } else if (selector == redirectSelector &&
+                       strcmp(encoding, "v48@0:8@16@24@32@?40") == 0) {
+                replacement = (IMP)XRBHookURLSessionRedirect;
+            } else if (selector == downloadFinishedSelector &&
+                       strcmp(encoding, "v32@0:8@16@24") == 0) {
+                replacement = (IMP)XRBHookURLSessionDownloadFinished;
+            } else if (selector == downloadCompleteSelector &&
+                       strcmp(encoding, "v32@0:8@16@24") == 0) {
+                replacement = (IMP)XRBHookURLSessionDownloadComplete;
             } else {
                 continue;
             }
