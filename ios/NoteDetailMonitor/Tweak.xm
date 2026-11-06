@@ -407,6 +407,15 @@ static BOOL NDMLooksLikeDetailController(UIViewController *controller) {
         [name containsString:@"detailviewcontroller"];
 }
 
+static BOOL NDMLooksLikeAuthController(UIViewController *controller) {
+    NSString *name = NDMControllerName(controller).lowercaseString;
+    return [name containsString:@"login"] ||
+        [name containsString:@"signin"] ||
+        [name containsString:@"verify"] ||
+        [name containsString:@"captcha"] ||
+        [name containsString:@"account"];
+}
+
 static id NDMDeepSnapshot(
     id object,
     NSUInteger depth,
@@ -1825,6 +1834,16 @@ static void NDMStartCommandPoll(void) {
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
+    if (NDMLooksLikeAuthController(self) &&
+        gPendingRequestID.length > 0) {
+        NDMPostEvent(@{
+            @"event": @"deep_link_blocked_auth",
+            @"request_id": gPendingRequestID ?: @"",
+            @"note_id": gPendingNoteID ?: @"",
+            @"controller": NDMControllerName(self),
+            @"call_stack": NDMCallStack()
+        });
+    }
     if (NDMLooksLikeDetailController(self)) {
         NDMReportController(self, @"appear", nil);
         NDMReportDetailHierarchy(self);
