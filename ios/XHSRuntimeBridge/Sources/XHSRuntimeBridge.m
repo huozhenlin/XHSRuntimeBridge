@@ -703,36 +703,6 @@ static BOOL XRBHookBoolObject(id self, SEL selector, id argument) {
     return result;
 }
 
-static BOOL XRBHookBoolObject(id self, SEL selector, id argument) {
-    XRBLogBusinessEnter(self, selector, @{
-        @"argument_class": argument
-            ? NSStringFromClass(object_getClass(argument)) : @"<nil>"
-    });
-    IMP original = XRBOriginalImplementation(self, selector);
-    BOOL result = original
-        ? ((BOOL (*)(id, SEL, id))original)(self, selector, argument)
-        : NO;
-
-    NSMutableDictionary *event = [NSMutableDictionary dictionaryWithDictionary:@{
-        @"event": @"note_model_transform",
-        @"class": NSStringFromClass(object_getClass(self)) ?: @"",
-        @"selector": NSStringFromSelector(selector) ?: @"",
-        @"success": @(result),
-        @"model_fields": XRBModelSummary(self),
-        @"call_stack": XRBCallStack()
-    }];
-    if (argument) {
-        NSMutableSet<NSValue *> *seen = [NSMutableSet set];
-        NSUInteger budget = 500;
-        event[@"input_snapshot"] = XRBDeepSnapshot(
-            argument, 0, seen, &budget
-        ) ?: [NSNull null];
-        event[@"remaining_budget"] = @(budget);
-    }
-    XRBLogEvent(@"note_model_transform", event);
-    return result;
-}
-
 static void XRBHookVoidObjectLong(
     id self,
     SEL selector,
