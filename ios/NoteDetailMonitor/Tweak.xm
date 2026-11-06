@@ -1904,8 +1904,9 @@ static void NDMImageBrowserWillDisplay(
     id indexPath
 ) {
     long long index = 0;
-    if ([indexPath respondsToSelector:@selector(item)]) {
-        index = [indexPath item];
+    NSIndexPath *typedIndexPath = (NSIndexPath *)indexPath;
+    if ([typedIndexPath respondsToSelector:@selector(item)]) {
+        index = typedIndexPath.item;
     }
     NDMReportImageBrowserMedia(self, cell, index, nil);
     if (gImageBrowserWillDisplayOriginal) {
