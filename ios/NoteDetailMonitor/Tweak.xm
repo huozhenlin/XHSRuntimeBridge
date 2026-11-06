@@ -35,7 +35,10 @@ static IMP gWidgetInjectOriginal;
 static IMP gWidgetInjectDictOriginal;
 static IMP gImageCacheStoreSetterOriginal;
 static IMP gImageRestoreOriginal;
+static IMP gImageBrowserRecordLoadOriginal;
+static IMP gImageBrowserWillDisplayOriginal;
 static void NDMInstallDetailViewModelHooks(void);
+static void NDMInstallImageBrowserHooks(void);
 
 static os_log_t NDMLog(void) {
     static os_log_t log;
@@ -1826,6 +1829,7 @@ static void NDMExecuteCommand(NSDictionary *command) {
 static void NDMPollCommands(void) {
     NDMInstallRouteHook();
     NDMInstallDetailViewModelHooks();
+    NDMInstallImageBrowserHooks();
     NSURL *URL = NDMCommandURL();
     if (!URL) {
         NDMStartCommandPoll();
@@ -1875,6 +1879,100 @@ static void NDMStartCommandPoll(void) {
             NDMPollCommands();
         }
     );
+}
+
+static void NDMImageBrowserRecordLoad(
+    id self,
+    SEL selector,
+    long long index,
+    id url
+) {
+    id browser = NDMReadKnownValue(self, @"imageBrowser");
+    NDMReportImageBrowserMedia(browser, nil, index, url);
+    if (gImageBrowserRecordLoadOriginal) {
+        ((void (*)(id, SEL, long long, id))gImageBrowserRecordLoadOriginal)(
+            self, selector, index, url
+        );
+    }
+}
+
+static void NDMImageBrowserWillDisplay(
+    id self,
+    SEL selector,
+    id collectionView,
+    id cell,
+    id indexPath
+) {
+    long long index = 0;
+    if ([indexPath respondsToSelector:@selector(item)]) {
+        index = [indexPath item];
+    }
+    NDMReportImageBrowserMedia(self, cell, index, nil);
+    if (gImageBrowserWillDisplayOriginal) {
+        ((void (*)(id, SEL, id, id, id))gImageBrowserWillDisplayOriginal)(
+            self, selector, collectionView, cell, indexPath
+        );
+    }
+}
+
+static void NDMInstallImageBrowserHooks(void) {
+    Class viewModel = NSClassFromString(
+        @"_TtC11XYNoteBasic7IBViewModel"
+    );
+    SEL recordSelector = NSSelectorFromString(
+        @"recordImageLoadFirstStartWithIndex:url:"
+    );
+    Method recordMethod = viewModel
+        ? class_getInstanceMethod(viewModel, recordSelector) : NULL;
+    if (recordMethod && !gImageBrowserRecordLoadOriginal &&
+        strcmp(method_getTypeEncoding(recordMethod), "v32@0:8q16@24") == 0) {
+        if (!NDMDirectMethod(viewModel, recordSelector)) {
+            class_addMethod(
+                viewModel,
+                recordSelector,
+                method_getImplementation(recordMethod),
+                method_getTypeEncoding(recordMethod)
+            );
+            recordMethod = NDMDirectMethod(viewModel, recordSelector);
+        }
+        gImageBrowserRecordLoadOriginal = method_setImplementation(
+            recordMethod, (IMP)NDMImageBrowserRecordLoad
+        );
+        NDMPostEvent(@{
+            @"event": @"image_browser_hook_installed",
+            @"class": NSStringFromClass(viewModel),
+            @"selector": NSStringFromSelector(recordSelector)
+        });
+    }
+
+    Class browser = NSClassFromString(
+        @"_TtC11XYNoteBasic12ImageBrowser"
+    );
+    SEL displaySelector = @selector(
+        collectionView:willDisplayCell:forItemAtIndexPath:
+    );
+    Method displayMethod = browser
+        ? class_getInstanceMethod(browser, displaySelector) : NULL;
+    if (displayMethod && !gImageBrowserWillDisplayOriginal &&
+        strcmp(method_getTypeEncoding(displayMethod), "v40@0:8@16@24@32") == 0) {
+        if (!NDMDirectMethod(browser, displaySelector)) {
+            class_addMethod(
+                browser,
+                displaySelector,
+                method_getImplementation(displayMethod),
+                method_getTypeEncoding(displayMethod)
+            );
+            displayMethod = NDMDirectMethod(browser, displaySelector);
+        }
+        gImageBrowserWillDisplayOriginal = method_setImplementation(
+            displayMethod, (IMP)NDMImageBrowserWillDisplay
+        );
+        NDMPostEvent(@{
+            @"event": @"image_browser_hook_installed",
+            @"class": NSStringFromClass(browser),
+            @"selector": NSStringFromSelector(displaySelector)
+        });
+    }
 }
 
 %group ImageBrowserMediaTrace
@@ -1957,7 +2055,6 @@ static void NDMStartCommandPoll(void) {
             @"event": @"note_detail_monitor_loaded"
         });
         %init(NoteDetailNavigation);
-        %init(ImageBrowserMediaTrace);
         NSLog(@"[NoteDetailMonitor] loaded");
         dispatch_async(dispatch_get_main_queue(), ^{
             NDMInstallRouteHook();
