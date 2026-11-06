@@ -913,7 +913,8 @@ static id NDMObserveDetailGetter(
         @"model_class": result
             ? NSStringFromClass(object_getClass(result))
             : @"<nil>",
-        @"fields": NDMExtractBusinessFields(result)
+        @"fields": NDMExtractBusinessFields(result),
+        @"call_stack": NDMCallStack()
     });
     return result;
 }
@@ -942,7 +943,8 @@ static void NDMObserveDetailSetter(
         @"model_class": value
             ? NSStringFromClass(object_getClass(value))
             : @"<nil>",
-        @"fields": NDMExtractBusinessFields(value)
+        @"fields": NDMExtractBusinessFields(value),
+        @"call_stack": NDMCallStack()
     }];
     if (value) {
         NSUInteger budget = 300;
