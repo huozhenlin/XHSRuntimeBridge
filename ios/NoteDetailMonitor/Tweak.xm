@@ -407,6 +407,43 @@ static void NDMCollectDetailChildren(
         @"note_id": fields[@"note_id"] ?: [NSNull null],
         @"user_id": fields[@"user_id"] ?: [NSNull null]
     }];
+    NSMutableArray<NSDictionary *> *candidateMethods = [NSMutableArray array];
+    for (Class cls = object_getClass(controller);
+         cls && cls != NSObject.class && candidateMethods.count < 80;
+         cls = class_getSuperclass(cls)) {
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(cls, &methodCount);
+        for (unsigned int index = 0;
+             index < methodCount && candidateMethods.count < 80;
+             index++) {
+            SEL selector = method_getName(methods[index]);
+            NSString *name = NSStringFromSelector(selector) ?: @"";
+            NSString *lower = name.lowercaseString;
+            BOOL interesting =
+                [lower containsString:@"note"] ||
+                [lower containsString:@"detail"] ||
+                [lower containsString:@"model"] ||
+                [lower containsString:@"data"] ||
+                [lower containsString:@"content"] ||
+                [lower containsString:@"request"] ||
+                [lower containsString:@"fetch"] ||
+                [lower containsString:@"load"] ||
+                [lower containsString:@"source"] ||
+                [lower containsString:@"image"] ||
+                [lower containsString:@"video"] ||
+                [lower containsString:@"widget"] ||
+                [lower containsString:@"pick"];
+            if (!interesting) continue;
+            const char *encoding = method_getTypeEncoding(methods[index]);
+            [candidateMethods addObject:@{
+                @"selector": name,
+                @"type_encoding": encoding
+                    ? [NSString stringWithUTF8String:encoding] : @""
+            }];
+        }
+        free(methods);
+    }
+    row[@"candidate_methods"] = candidateMethods;
 
     for (NSString *key in @[
         @"pu_debugCurrentViewModel", @"wgt_getWidgetModel",
