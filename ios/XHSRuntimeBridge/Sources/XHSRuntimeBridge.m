@@ -923,17 +923,19 @@ static void XRBInstallURLSessionDelegateObservation(void) {
         (Class __unsafe_unretained *)calloc((size_t)count, sizeof(Class));
     count = objc_getClassList(classes, count);
 
+    NSArray<NSString *> *delegateSelectorNames = @[
+        @"URLSession:dataTask:didReceiveData:",
+        @"URLSession:task:didCompleteWithError:",
+        @"URLSession:dataTask:didReceiveResponse:completionHandler:",
+        @"URLSession:task:willPerformHTTPRedirection:newRequest:completionHandler:",
+        @"URLSession:downloadTask:didFinishDownloadingToURL:",
+        @"URLSession:downloadTask:didCompleteWithError:"
+    ];
     for (int index = 0; index < count; index++) {
         Class cls = classes[index];
         if (!XRBIsAppDelegateClass(cls)) continue;
-        for (SEL selector in @[
-            receiveSelector,
-            completeSelector,
-            responseSelector,
-            redirectSelector,
-            downloadFinishedSelector,
-            downloadCompleteSelector
-        ]) {
+        for (NSString *selectorName in delegateSelectorNames) {
+            SEL selector = NSSelectorFromString(selectorName);
             Method method = XRBDirectMethod(cls, selector);
             if (!method) continue;
 
