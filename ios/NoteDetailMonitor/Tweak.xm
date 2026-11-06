@@ -1005,6 +1005,27 @@ static void NDMCurrentImageIDSetter(id self, SEL selector, id value) {
     NDMObserveDetailSetter(
         self, selector, value, gCurrentImageIDSetterOriginal
     );
+    id displayImage = NDMReadKnownValue(self, @"displayImage");
+    if (displayImage) {
+        NSUInteger budget = 400;
+        NSMutableDictionary *event = [NSMutableDictionary
+            dictionaryWithDictionary:@{
+                @"event": @"image_display_resolved",
+                @"property": @"setCurrentImageID:",
+                @"image_id": value ?: [NSNull null],
+                @"display_class": NSStringFromClass(
+                    object_getClass(displayImage)
+                ) ?: @"",
+                @"display_fields": NDMExtractBusinessFields(displayImage),
+                @"display_snapshot": NDMDeepSnapshot(
+                    displayImage, 0, [NSMutableSet set], &budget
+                ) ?: [NSNull null],
+                @"remaining_budget": @(budget),
+                @"call_stack": NDMCallStack()
+            }];
+        [event addEntriesFromDictionary:NDMTraceContext(self)];
+        NDMPostEvent(event);
+    }
 }
 
 static void NDMWidgetInject(id self, SEL selector, id value) {
@@ -1031,6 +1052,26 @@ static void NDMImageRestore(id self, SEL selector) {
     });
     if (gImageRestoreOriginal) {
         ((void (*)(id, SEL))gImageRestoreOriginal)(self, selector);
+    }
+    id displayImage = NDMReadKnownValue(self, @"displayImage");
+    if (displayImage) {
+        NSUInteger budget = 400;
+        NSMutableDictionary *event = [NSMutableDictionary
+            dictionaryWithDictionary:@{
+                @"event": @"image_display_resolved",
+                @"property": NSStringFromSelector(selector) ?: @"",
+                @"display_class": NSStringFromClass(
+                    object_getClass(displayImage)
+                ) ?: @"",
+                @"display_fields": NDMExtractBusinessFields(displayImage),
+                @"display_snapshot": NDMDeepSnapshot(
+                    displayImage, 0, [NSMutableSet set], &budget
+                ) ?: [NSNull null],
+                @"remaining_budget": @(budget),
+                @"call_stack": NDMCallStack()
+            }];
+        [event addEntriesFromDictionary:NDMTraceContext(self)];
+        NDMPostEvent(event);
     }
 }
 
