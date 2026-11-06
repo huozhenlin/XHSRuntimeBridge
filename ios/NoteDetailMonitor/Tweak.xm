@@ -183,6 +183,72 @@ static void NDMPostEvent(NSDictionary *event) {
     [task resume];
 }
 
+static id NDMReadKnownValue(id object, NSString *key);
+static NSArray<NSString *> *NDMCallStack(void);
+static NSDictionary *NDMTraceContext(id object);
+
+static NSString *NDMURLString(id value) {
+    if ([value isKindOfClass:NSURL.class]) {
+        return [(NSURL *)value absoluteString];
+    }
+    if ([value isKindOfClass:NSString.class]) {
+        return value;
+    }
+    return nil;
+}
+
+static void NDMReportImageBrowserMedia(
+    id browser,
+    id cell,
+    long long index,
+    id directURL
+) {
+    id asset = NDMReadKnownValue(cell, @"asset");
+    NSString *noteID = NDMShortString(NDMReadKnownValue(browser, @"noteId"));
+    if (noteID.length == 0) {
+        noteID = gPendingNoteID;
+    }
+
+    NSString *url = NDMURLString(directURL);
+    if (url.length == 0) {
+        url = NDMURLString(NDMReadKnownValue(cell, @"url"));
+    }
+    if (url.length == 0) {
+        url = NDMURLString(NDMReadKnownValue(cell, @"originalUrl"));
+    }
+    if (url.length == 0) {
+        url = NDMURLString(NDMReadKnownValue(cell, @"weakUrl"));
+    }
+
+    NSString *liveVideo = NDMURLString(
+        NDMReadKnownValue(asset, @"livePhotoVideoURL")
+    );
+    NSString *liveImage = NDMURLString(
+        NDMReadKnownValue(asset, @"livePhotoImageURL")
+    );
+    id fileID = NDMReadKnownValue(asset, @"livePhotoVideoFileId");
+
+    if (url.length == 0 && liveVideo.length == 0 && liveImage.length == 0) {
+        return;
+    }
+
+    NSMutableDictionary *event = [NSMutableDictionary dictionaryWithDictionary:@{
+        @"event": @"image_media_observed",
+        @"source": @"ImageBrowser",
+        @"note_id": noteID ?: [NSNull null],
+        @"index": @(index),
+        @"cell_class": cell
+            ? NSStringFromClass(object_getClass(cell)) : @"<nil>",
+        @"url": url ?: [NSNull null],
+        @"live_photo_video_url": liveVideo ?: [NSNull null],
+        @"live_photo_image_url": liveImage ?: [NSNull null],
+        @"live_photo_video_file_id": fileID ?: [NSNull null],
+        @"call_stack": NDMCallStack()
+    }];
+    [event addEntriesFromDictionary:NDMTraceContext(browser)];
+    NDMPostEvent(event);
+}
+
 static BOOL NDMIsSensitiveKey(NSString *key) {
     NSString *normalized = [[key lowercaseString]
         stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
@@ -1811,6 +1877,37 @@ static void NDMStartCommandPoll(void) {
     );
 }
 
+%group ImageBrowserMediaTrace
+
+%hook _TtC11XYNoteBasic7IBViewModel
+
+- (void)recordImageLoadFirstStartWithIndex:(long long)index
+                                       url:(id)url {
+    id browser = NDMReadKnownValue(self, @"imageBrowser");
+    NDMReportImageBrowserMedia(browser, nil, index, url);
+    %orig;
+}
+
+%end
+
+%hook _TtC11XYNoteBasic12ImageBrowser
+
+- (void)collectionView:(UICollectionView *)collectionView
+       willDisplayCell:(UICollectionViewCell *)cell
+    forItemAtIndexPath:(NSIndexPath *)indexPath {
+    NDMReportImageBrowserMedia(
+        self,
+        cell,
+        (long long)indexPath.item,
+        nil
+    );
+    %orig;
+}
+
+%end
+
+%end
+
 %group NoteDetailNavigation
 
 %hook UINavigationController
@@ -1860,6 +1957,7 @@ static void NDMStartCommandPoll(void) {
             @"event": @"note_detail_monitor_loaded"
         });
         %init(NoteDetailNavigation);
+        %init(ImageBrowserMediaTrace);
         NSLog(@"[NoteDetailMonitor] loaded");
         dispatch_async(dispatch_get_main_queue(), ^{
             NDMInstallRouteHook();
