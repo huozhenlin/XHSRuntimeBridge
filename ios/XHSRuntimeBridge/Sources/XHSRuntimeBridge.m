@@ -6,8 +6,6 @@
 
 void XRBInstallSettingsUI(void);
 
-static NSString *const XRBNoteDetailPath = @"/api/sns/v10/note";
-
 typedef struct XRBMethodHookEntry {
     Class cls;
     SEL selector;
@@ -48,6 +46,55 @@ static NSArray<NSString *> *XRBQueryNames(NSURL *URL) {
     return names;
 }
 
+static id XRBTrimJSON(
+    id value,
+    NSUInteger depth,
+    NSUInteger *budget
+) {
+    if (!value || *budget == 0) return [NSNull null];
+    if (depth > 4) return @"<max-depth>";
+    (*budget)--;
+
+    if ([value isKindOfClass:NSString.class]) {
+        NSString *text = value;
+        return text.length > 1024 ? [text substringToIndex:1024] : text;
+    }
+    if ([value isKindOfClass:NSNumber.class] ||
+        [value isKindOfClass:NSNull.class]) {
+        return value;
+    }
+    if ([value isKindOfClass:NSArray.class]) {
+        NSMutableArray *result = [NSMutableArray array];
+        NSUInteger count = MIN((NSUInteger)[(NSArray *)value count],
+                               (NSUInteger)64);
+        for (NSUInteger index = 0;
+             index < count && *budget > 0;
+             index++) {
+            [result addObject:XRBTrimJSON(
+                [(NSArray *)value objectAtIndex:index],
+                depth + 1,
+                budget
+            ) ?: [NSNull null]];
+        }
+        return result;
+    }
+    if ([value isKindOfClass:NSDictionary.class]) {
+        NSMutableDictionary *result = [NSMutableDictionary dictionary];
+        NSUInteger count = 0;
+        for (id key in [(NSDictionary *)value allKeys]) {
+            if (count++ >= 96 || *budget == 0) break;
+            NSString *name = [key description] ?: @"";
+            result[name] = XRBTrimJSON(
+                [(NSDictionary *)value objectForKey:key],
+                depth + 1,
+                budget
+            ) ?: [NSNull null];
+        }
+        return result;
+    }
+    return [value description] ?: @"";
+}
+
 static NSDictionary *XRBResponseSummary(
     NSData *data,
     NSURLResponse *response,
@@ -75,14 +122,33 @@ static NSDictionary *XRBResponseSummary(
                 }];
             summary[@"json_type"] = @"dictionary";
             summary[@"top_level_keys"] = keys;
+            NSUInteger budget = 400;
+            summary[@"json_snapshot"] = XRBTrimJSON(JSON, 0, &budget);
+            summary[@"json_remaining_budget"] = @(budget);
         } else if ([JSON isKindOfClass:NSArray.class]) {
             summary[@"json_type"] = @"array";
             summary[@"array_count"] = @([(NSArray *)JSON count]);
+            NSUInteger budget = 400;
+            summary[@"json_snapshot"] = XRBTrimJSON(JSON, 0, &budget);
+            summary[@"json_remaining_budget"] = @(budget);
         } else {
             summary[@"json_type"] = @"non_json";
         }
     }
     return summary;
+}
+
+static BOOL XRBIsLikelyNoteRequest(NSURL *URL) {
+    if (!URL) return NO;
+    NSString *path = URL.path.lowercaseString ?: @"";
+    if ([path containsString:@"/api/sns/v10/note"]) return YES;
+    if (![path containsString:@"/api/"]) return NO;
+    for (NSString *term in @[
+        @"note", @"feed", @"explore", @"image", @"video", @"detail"
+    ]) {
+        if ([path containsString:term]) return YES;
+    }
+    return NO;
 }
 
 static NSString *XRBShortDescription(id value) {
@@ -758,7 +824,7 @@ static void XRBRescanBusinessHooks(void) {
     }
 
     NSURL *URL = request.URL;
-    BOOL isNoteDetail = [URL.path containsString:XRBNoteDetailPath];
+    BOOL isNoteDetail = XRBIsLikelyNoteRequest(URL);
     if (!isNoteDetail) {
         return [self xrb_dataTaskWithRequest:request
                           completionHandler:completionHandler];
