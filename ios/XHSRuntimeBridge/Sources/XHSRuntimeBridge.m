@@ -795,6 +795,14 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
         summary[@"getter"] = selectorName;
         summary[@"getter_class"] = NSStringFromClass(object_getClass(self))
             ?: @"";
+        if (result) {
+            NSMutableSet<NSValue *> *seen = [NSMutableSet set];
+            NSUInteger budget = 1200;
+            summary[@"snapshot"] = XRBDeepSnapshot(
+                result, 0, seen, &budget
+            ) ?: [NSNull null];
+            summary[@"remaining_budget"] = @(budget);
+        }
         XRBLogEvent(@"note_model_received", summary);
         if ([selectorName isEqualToString:@"imagesList"] ||
             [selectorName isEqualToString:@"videoURLs"] ||

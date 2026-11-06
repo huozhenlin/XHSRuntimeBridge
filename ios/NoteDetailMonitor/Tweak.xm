@@ -189,6 +189,12 @@ static void NDMPostEvent(NSDictionary *event) {
 static id NDMReadKnownValue(id object, NSString *key);
 static NSArray<NSString *> *NDMCallStack(void);
 static NSDictionary *NDMTraceContext(id object);
+static id NDMDeepSnapshot(
+    id object,
+    NSUInteger depth,
+    NSMutableSet<NSValue *> *seen,
+    NSUInteger *budget
+);
 
 static NSString *NDMURLString(id value) {
     if ([value isKindOfClass:NSURL.class]) {
@@ -248,6 +254,21 @@ static void NDMReportImageBrowserMedia(
         @"live_photo_video_file_id": fileID ?: [NSNull null],
         @"call_stack": NDMCallStack()
     }];
+    NSUInteger cellBudget = 500;
+    event[@"cell_snapshot"] = NDMDeepSnapshot(
+        cell, 0, [NSMutableSet set], &cellBudget
+    ) ?: [NSNull null];
+    event[@"cell_remaining_budget"] = @(cellBudget);
+    NSUInteger assetBudget = 300;
+    event[@"asset_snapshot"] = NDMDeepSnapshot(
+        asset, 0, [NSMutableSet set], &assetBudget
+    ) ?: [NSNull null];
+    event[@"asset_remaining_budget"] = @(assetBudget);
+    NSUInteger browserBudget = 180;
+    event[@"browser_snapshot"] = NDMDeepSnapshot(
+        browser, 0, [NSMutableSet set], &browserBudget
+    ) ?: [NSNull null];
+    event[@"browser_remaining_budget"] = @(browserBudget);
     [event addEntriesFromDictionary:NDMTraceContext(browser)];
     NDMPostEvent(event);
 }
