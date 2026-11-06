@@ -41,6 +41,13 @@ static NSArray<NSString *> *XRBInterestingSelectors(void) {
         @"setVideoURLs:",
         @"setNote:",
         @"setViewModel:",
+        @"setModel:",
+        @"setData:",
+        @"setContentModel:",
+        @"model",
+        @"viewModel",
+        @"contentModel",
+        @"setCellViewModelList:",
         @"noteId",
         @"noteID",
         @"userId",
@@ -613,6 +620,16 @@ static void XRBHookVoidObject(id self, SEL selector, id argument) {
             ) ?: [NSNull null],
             @"remaining_budget": @(budget)
         });
+        if ([selectorName isEqualToString:@"setVideoInfo:"] ||
+            [selectorName isEqualToString:@"setVideoURL:"] ||
+            [selectorName isEqualToString:@"setVideoURLs:"] ||
+            [selectorName isEqualToString:@"setNote:"] ||
+            [selectorName isEqualToString:@"setViewModel:"] ||
+            [selectorName isEqualToString:@"setModel:"] ||
+            [selectorName isEqualToString:@"setData:"] ||
+            [selectorName isEqualToString:@"setContentModel:"]) {
+            XRBLogEvent(@"media_field_received", summary);
+        }
     }
     IMP original = XRBOriginalImplementation(self, selector);
     if (original) {
@@ -710,6 +727,7 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
         @"videoData", @"videoDataInfo", @"videoUrl", @"identifier",
         @"noteId", @"noteID", @"userId", @"userID", @"title", @"desc",
         @"likedCount", @"commentsCount", @"collectedCount", @"shareCount",
+        @"model", @"viewModel", @"contentModel",
         @"cellViewModelList",
         @"downloadButtonTapped:",
         @"mediaBrowserViewModelDidClickDownloadButtonAtIndex:index:"
@@ -753,6 +771,9 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
         [selectorName isEqualToString:@"videoURLs"] ||
         [selectorName isEqualToString:@"videoURL"] ||
         [selectorName isEqualToString:@"videoInfo"] ||
+        [selectorName isEqualToString:@"model"] ||
+        [selectorName isEqualToString:@"viewModel"] ||
+        [selectorName isEqualToString:@"contentModel"] ||
         [selectorName isEqualToString:@"noteDetailModel"] ||
         [selectorName isEqualToString:@"noteDetail"] ||
         [selectorName isEqualToString:@"noteModel"] ||
@@ -1399,6 +1420,13 @@ static void XRBInstallMediaFieldHooks(void) {
         @"setVideoURLs:",
         @"setNote:",
         @"setViewModel:",
+        @"setModel:",
+        @"setData:",
+        @"setContentModel:",
+        @"model",
+        @"viewModel",
+        @"contentModel",
+        @"setCellViewModelList:",
         @"note_data", @"media_data", @"cur_position", @"context", @"scene",
         @"original_url", @"url", @"media_type", @"uniqueId",
         @"browserItemUrl", @"browserItemOriginUrl", @"browserItemFileId",
