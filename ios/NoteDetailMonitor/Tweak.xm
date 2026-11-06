@@ -290,7 +290,12 @@ static NSArray<NSString *> *NDMKeys(void) {
         @"source", @"sourceType", @"source_type", @"sourceId",
         @"sourceIDForRouter", @"scene", @"entry",
         @"from", @"entrance", @"pageSource", @"openSource",
-        @"feedId", @"feed_id"
+        @"feedId", @"feed_id",
+        @"title", @"desc", @"description",
+        @"likedCount", @"commentsCount", @"collectedCount",
+        @"shareCount", @"likeCount", @"commentCount",
+        @"collectCount", @"sharedCount",
+        @"isLiked", @"isCollected", @"interactInfo", @"interactionInfo"
     ];
 }
 
@@ -359,6 +364,21 @@ static NSDictionary *NDMExtractBusinessFields(id object) {
             outputKey = @"source";
         } else if ([normalized containsString:@"feed"]) {
             outputKey = @"feed_id";
+        } else if ([normalized isEqualToString:@"title"]) {
+            outputKey = @"title";
+        } else if ([normalized isEqualToString:@"desc"] ||
+                   [normalized isEqualToString:@"description"]) {
+            outputKey = @"desc";
+        } else if ([normalized containsString:@"like"]) {
+            outputKey = @"liked_count";
+        } else if ([normalized containsString:@"comment"]) {
+            outputKey = @"comments_count";
+        } else if ([normalized containsString:@"collect"]) {
+            outputKey = @"collected_count";
+        } else if ([normalized containsString:@"share"]) {
+            outputKey = @"share_count";
+        } else if ([normalized containsString:@"interact"]) {
+            outputKey = @"interact_info";
         } else if ([normalized containsString:@"router"] ||
                    [normalized containsString:@"route"]) {
             outputKey = @"router_params";
