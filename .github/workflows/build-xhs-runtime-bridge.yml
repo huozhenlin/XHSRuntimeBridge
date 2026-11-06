@@ -12,10 +12,9 @@ on:
 
 jobs:
   build:
-    # macos-14 is currently mapped to an unavailable arm64 configuration for
-    # this repository. macos-13 provides the Intel macOS image required by
-    # Theos and avoids the unsupported runner configuration.
-    runs-on: macos-13
+    # Use the current explicit Intel label. The generic macos-14 label is
+    # currently resolving to an unsupported arm64 configuration here.
+    runs-on: macos-15-intel
     permissions:
       contents: read
 
