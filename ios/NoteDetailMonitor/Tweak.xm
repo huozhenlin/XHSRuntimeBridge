@@ -26,6 +26,10 @@ static IMP gWidgetModelOriginal;
 static IMP gPickDataOriginal;
 static IMP gWidgetModelSetterOriginal;
 static IMP gPickDataSetterOriginal;
+static IMP gDisplayImageOriginal;
+static IMP gDisplayImageSetterOriginal;
+static IMP gCurrentImageIDOriginal;
+static IMP gCurrentImageIDSetterOriginal;
 static void NDMInstallDetailViewModelHooks(void);
 
 static os_log_t NDMLog(void) {
@@ -928,14 +932,22 @@ static void NDMObserveDetailSetter(
     id value,
     IMP original
 ) {
-    NDMPostEvent(@{
+    NSMutableDictionary *event = [NSMutableDictionary dictionaryWithDictionary:@{
         @"event": @"detail_viewmodel_observed",
         @"property": NSStringFromSelector(selector) ?: @"",
         @"model_class": value
             ? NSStringFromClass(object_getClass(value))
             : @"<nil>",
         @"fields": NDMExtractBusinessFields(value)
-    });
+    }];
+    if (value) {
+        NSUInteger budget = 300;
+        event[@"snapshot"] = NDMDeepSnapshot(
+            value, 0, [NSMutableSet set], &budget
+        ) ?: [NSNull null];
+        event[@"remaining_budget"] = @(budget);
+    }
+    NDMPostEvent(event);
     if (original) {
         ((void (*)(id, SEL, id))original)(self, selector, value);
     }
@@ -949,6 +961,24 @@ static void NDMPickDataSetter(id self, SEL selector, id value) {
     NDMObserveDetailSetter(self, selector, value, gPickDataSetterOriginal);
 }
 
+static id NDMDisplayImageGetter(id self, SEL selector) {
+    return NDMObserveDetailGetter(self, selector, gDisplayImageOriginal);
+}
+
+static void NDMDisplayImageSetter(id self, SEL selector, id value) {
+    NDMObserveDetailSetter(self, selector, value, gDisplayImageSetterOriginal);
+}
+
+static id NDMCurrentImageIDGetter(id self, SEL selector) {
+    return NDMObserveDetailGetter(self, selector, gCurrentImageIDOriginal);
+}
+
+static void NDMCurrentImageIDSetter(id self, SEL selector, id value) {
+    NDMObserveDetailSetter(
+        self, selector, value, gCurrentImageIDSetterOriginal
+    );
+}
+
 static void NDMInstallDetailViewModelHooks(void) {
     Class cls = NSClassFromString(@"XYNoteModule.NoteDetailPageInterface");
     if (!cls) return;
@@ -958,7 +988,11 @@ static void NDMInstallDetailViewModelHooks(void) {
         @[@"wgt_getWidgetModel", @"widget"],
         @[@"xyps_pickData", @"pick"],
         @[@"wgt_setWidgetModel:", @"widget_set"],
-        @[@"setXyps_pickData:", @"pick_set"]
+        @[@"setXyps_pickData:", @"pick_set"],
+        @[@"displayImage", @"display_image"],
+        @[@"setDisplayImage:", @"display_image_set"],
+        @[@"currentImageID", @"current_image_id"],
+        @[@"setCurrentImageID:", @"current_image_id_set"]
     ];
     for (NSArray<NSString *> *target in targets) {
         SEL selector = NSSelectorFromString(target[0]);
@@ -1016,6 +1050,26 @@ static void NDMInstallDetailViewModelHooks(void) {
                    !gPickDataSetterOriginal) {
             gPickDataSetterOriginal = method_setImplementation(
                 method, (IMP)NDMPickDataSetter
+            );
+        } else if ([target[1] isEqualToString:@"display_image"] &&
+                   !gDisplayImageOriginal) {
+            gDisplayImageOriginal = method_setImplementation(
+                method, (IMP)NDMDisplayImageGetter
+            );
+        } else if ([target[1] isEqualToString:@"display_image_set"] &&
+                   !gDisplayImageSetterOriginal) {
+            gDisplayImageSetterOriginal = method_setImplementation(
+                method, (IMP)NDMDisplayImageSetter
+            );
+        } else if ([target[1] isEqualToString:@"current_image_id"] &&
+                   !gCurrentImageIDOriginal) {
+            gCurrentImageIDOriginal = method_setImplementation(
+                method, (IMP)NDMCurrentImageIDGetter
+            );
+        } else if ([target[1] isEqualToString:@"current_image_id_set"] &&
+                   !gCurrentImageIDSetterOriginal) {
+            gCurrentImageIDSetterOriginal = method_setImplementation(
+                method, (IMP)NDMCurrentImageIDSetter
             );
         }
         NDMPostEvent(@{
