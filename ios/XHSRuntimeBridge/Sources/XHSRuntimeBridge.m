@@ -653,7 +653,7 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
         @"note_data", @"media_data", @"cur_position", @"context", @"scene",
         @"original_url", @"url", @"media_type", @"uniqueId",
         @"browserItemUrl", @"browserItemOriginUrl", @"browserItemFileId",
-        @"livePhotoVideoPath", @"image", @"video", @"imageData",
+        @"livePhotoVideoPath", @"id", @"image", @"video", @"imageData",
         @"videoData", @"videoDataInfo", @"videoUrl", @"identifier",
         @"cellViewModelList"
     ]];
@@ -1152,6 +1152,18 @@ static void XRBInstallBusinessHook(
     if (!cls || !selector) return;
 
     Method method = XRBDirectMethod(cls, selector);
+    if (!method) {
+        Method inherited = class_getInstanceMethod(cls, selector);
+        if (inherited &&
+            class_addMethod(
+                cls,
+                selector,
+                method_getImplementation(inherited),
+                method_getTypeEncoding(inherited)
+            )) {
+            method = XRBDirectMethod(cls, selector);
+        }
+    }
     if (!method) return;
 
     const char *encoding = method_getTypeEncoding(method);
@@ -1304,6 +1316,10 @@ static void XRBInstallMediaFieldHooks(void) {
         NSString *className = NSStringFromClass(cls);
         for (NSString *selectorName in selectors) {
             XRBInstallBusinessHook(className, selectorName);
+        }
+        if ([className containsString:@"MediaBrowserNoteInfo"] ||
+            [className containsString:@"MediaBrowserItemInfo"]) {
+            XRBInstallBusinessHook(className, @"id");
         }
     }
     free(classes);
