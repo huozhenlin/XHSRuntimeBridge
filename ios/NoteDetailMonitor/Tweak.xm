@@ -380,6 +380,72 @@ static BOOL NDMLooksLikeDetailController(UIViewController *controller) {
         [name containsString:@"detailviewcontroller"];
 }
 
+static id NDMDeepSnapshot(
+    id object,
+    NSUInteger depth,
+    NSMutableSet<NSValue *> *seen,
+    NSUInteger *budget
+);
+
+static void NDMCollectDetailChildren(
+    UIViewController *controller,
+    NSUInteger depth,
+    NSMutableArray<NSDictionary *> *rows,
+    NSUInteger *budget
+) {
+    if (!controller || depth > 4 || *budget == 0) return;
+    (*budget)--;
+
+    NSString *className = NDMControllerName(controller);
+    NSDictionary *fields = NDMExtractBusinessFields(controller);
+    NSMutableDictionary *row = [NSMutableDictionary dictionaryWithDictionary:@{
+        @"class": className ?: @"",
+        @"depth": @(depth),
+        @"child_count": @(
+            controller.childViewControllers.count
+        ),
+        @"note_id": fields[@"note_id"] ?: [NSNull null],
+        @"user_id": fields[@"user_id"] ?: [NSNull null]
+    }];
+
+    for (NSString *key in @[
+        @"pu_debugCurrentViewModel", @"wgt_getWidgetModel",
+        @"xyps_pickData", @"contentNoteModel", @"noteModel",
+        @"noteDetailModel", @"data", @"model"
+    ]) {
+        id value = NDMReadKnownValue(controller, key);
+        if (!value) continue;
+        row[@"model_property"] = key;
+        row[@"model_class"] = NSStringFromClass(object_getClass(value))
+            ?: @"";
+        row[@"model_fields"] = NDMExtractBusinessFields(value);
+        NSUInteger snapshotBudget = 160;
+        row[@"model_snapshot"] = NDMDeepSnapshot(
+            value, 0, [NSMutableSet set], &snapshotBudget
+        ) ?: [NSNull null];
+        break;
+    }
+    [rows addObject:row];
+
+    for (UIViewController *child in controller.childViewControllers) {
+        NDMCollectDetailChildren(child, depth + 1, rows, budget);
+        if (*budget == 0) break;
+    }
+}
+
+static void NDMReportDetailHierarchy(UIViewController *controller) {
+    if (!controller) return;
+    NSMutableArray<NSDictionary *> *rows = [NSMutableArray array];
+    NSUInteger budget = 80;
+    NDMCollectDetailChildren(controller, 0, rows, &budget);
+    NDMPostEvent(@{
+        @"event": @"detail_child_hierarchy",
+        @"controller": NDMControllerName(controller),
+        @"rows": rows,
+        @"remaining_budget": @(budget)
+    });
+}
+
 static void NDMReportController(
     UIViewController *controller,
     NSString *navigationKind,
@@ -1528,6 +1594,7 @@ static void NDMStartCommandPoll(void) {
     %orig;
     if (NDMLooksLikeDetailController(self)) {
         NDMReportController(self, @"appear", nil);
+        NDMReportDetailHierarchy(self);
     }
 }
 
