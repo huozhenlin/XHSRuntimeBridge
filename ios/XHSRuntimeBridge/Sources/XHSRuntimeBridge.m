@@ -502,11 +502,45 @@ static void XRBHookObjectCompletion(
     });
     IMP original = XRBOriginalImplementation(self, selector);
     if (original) {
+        void (^wrappedCompletion)(id, id) = ^(id result, id error) {
+            NSMutableDictionary *summary = [NSMutableDictionary
+                dictionaryWithDictionary:XRBModelSummary(result)];
+            summary[@"class"] = NSStringFromClass(object_getClass(self))
+                ?: @"";
+            summary[@"selector"] = NSStringFromSelector(selector) ?: @"";
+            summary[@"result_class"] = result
+                ? NSStringFromClass(object_getClass(result))
+                : @"<nil>";
+            summary[@"error_class"] = error
+                ? NSStringFromClass(object_getClass(error))
+                : @"<nil>";
+            XRBLogEvent(@"business_completion", summary);
+
+            if (result) {
+                NSMutableSet<NSValue *> *seen = [NSMutableSet set];
+                NSUInteger budget = 600;
+                XRBLogEvent(@"note_model_completion_dump", @{
+                    @"class": NSStringFromClass(object_getClass(self))
+                        ?: @"",
+                    @"selector": NSStringFromSelector(selector) ?: @"",
+                    @"model_class": NSStringFromClass(object_getClass(result))
+                        ?: @"",
+                    @"snapshot": XRBDeepSnapshot(
+                        result, 0, seen, &budget
+                    ) ?: [NSNull null],
+                    @"remaining_budget": @(budget)
+                });
+            }
+
+            if (completion) {
+                ((void (^)(id, id))completion)(result, error);
+            }
+        };
         ((void (*)(id, SEL, id, id))original)(
             self,
             selector,
             argument,
-            completion
+            wrappedCompletion
         );
     }
 }
