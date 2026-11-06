@@ -30,6 +30,10 @@ static IMP gDisplayImageOriginal;
 static IMP gDisplayImageSetterOriginal;
 static IMP gCurrentImageIDOriginal;
 static IMP gCurrentImageIDSetterOriginal;
+static IMP gWidgetInjectOriginal;
+static IMP gWidgetInjectDictOriginal;
+static IMP gImageCacheStoreSetterOriginal;
+static IMP gImageRestoreOriginal;
 static void NDMInstallDetailViewModelHooks(void);
 
 static os_log_t NDMLog(void) {
@@ -979,6 +983,33 @@ static void NDMCurrentImageIDSetter(id self, SEL selector, id value) {
     );
 }
 
+static void NDMWidgetInject(id self, SEL selector, id value) {
+    NDMObserveDetailSetter(self, selector, value, gWidgetInjectOriginal);
+}
+
+static void NDMWidgetInjectDict(id self, SEL selector, id value) {
+    NDMObserveDetailSetter(
+        self, selector, value, gWidgetInjectDictOriginal
+    );
+}
+
+static void NDMImageCacheStoreSetter(id self, SEL selector, id value) {
+    NDMObserveDetailSetter(
+        self, selector, value, gImageCacheStoreSetterOriginal
+    );
+}
+
+static void NDMImageRestore(id self, SEL selector) {
+    NDMPostEvent(@{
+        @"event": @"detail_viewmodel_observed",
+        @"property": NSStringFromSelector(selector) ?: @"",
+        @"model_class": @"<void>"
+    });
+    if (gImageRestoreOriginal) {
+        ((void (*)(id, SEL))gImageRestoreOriginal)(self, selector);
+    }
+}
+
 static void NDMInstallDetailViewModelHooks(void) {
     Class cls = NSClassFromString(@"XYNoteModule.NoteDetailPageInterface");
     if (!cls) return;
@@ -992,7 +1023,11 @@ static void NDMInstallDetailViewModelHooks(void) {
         @[@"displayImage", @"display_image"],
         @[@"setDisplayImage:", @"display_image_set"],
         @[@"currentImageID", @"current_image_id"],
-        @[@"setCurrentImageID:", @"current_image_id_set"]
+        @[@"setCurrentImageID:", @"current_image_id_set"],
+        @[@"wgt_injectWidget:", @"widget_inject"],
+        @[@"wgt_injectWidgetWithDict:", @"widget_inject_dict"],
+        @[@"setXYImageCacheStore:", @"image_cache_store_set"],
+        @[@"xy_imageRestore", @"image_restore"]
     ];
     for (NSArray<NSString *> *target in targets) {
         SEL selector = NSSelectorFromString(target[0]);
@@ -1006,8 +1041,24 @@ static void NDMInstallDetailViewModelHooks(void) {
             continue;
         }
         const char *encoding = method_getTypeEncoding(method);
-        if ([target[1] hasSuffix:@"_set"]) {
+        BOOL objectSetter =
+            [target[1] hasSuffix:@"_set"] ||
+            [target[1] isEqualToString:@"widget_inject"] ||
+            [target[1] isEqualToString:@"widget_inject_dict"];
+        if (objectSetter) {
             if (strcmp(encoding, "v24@0:8@16") != 0) {
+                NDMPostEvent(@{
+                    @"event": @"detail_viewmodel_hook_candidate",
+                    @"property": target[0],
+                    @"status": @"unsupported",
+                    @"type_encoding": encoding
+                        ? [NSString stringWithUTF8String:encoding]
+                        : @""
+                });
+                continue;
+            }
+        } else if ([target[1] isEqualToString:@"image_restore"]) {
+            if (strcmp(encoding, "v16@0:8") != 0) {
                 NDMPostEvent(@{
                     @"event": @"detail_viewmodel_hook_candidate",
                     @"property": target[0],
@@ -1070,6 +1121,26 @@ static void NDMInstallDetailViewModelHooks(void) {
                    !gCurrentImageIDSetterOriginal) {
             gCurrentImageIDSetterOriginal = method_setImplementation(
                 method, (IMP)NDMCurrentImageIDSetter
+            );
+        } else if ([target[1] isEqualToString:@"widget_inject"] &&
+                   !gWidgetInjectOriginal) {
+            gWidgetInjectOriginal = method_setImplementation(
+                method, (IMP)NDMWidgetInject
+            );
+        } else if ([target[1] isEqualToString:@"widget_inject_dict"] &&
+                   !gWidgetInjectDictOriginal) {
+            gWidgetInjectDictOriginal = method_setImplementation(
+                method, (IMP)NDMWidgetInjectDict
+            );
+        } else if ([target[1] isEqualToString:@"image_cache_store_set"] &&
+                   !gImageCacheStoreSetterOriginal) {
+            gImageCacheStoreSetterOriginal = method_setImplementation(
+                method, (IMP)NDMImageCacheStoreSetter
+            );
+        } else if ([target[1] isEqualToString:@"image_restore"] &&
+                   !gImageRestoreOriginal) {
+            gImageRestoreOriginal = method_setImplementation(
+                method, (IMP)NDMImageRestore
             );
         }
         NDMPostEvent(@{
