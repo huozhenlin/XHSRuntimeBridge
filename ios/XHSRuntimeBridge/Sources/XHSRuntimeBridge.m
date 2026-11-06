@@ -58,6 +58,14 @@ static NSArray<NSString *> *XRBInterestingSelectors(void) {
         @"commentsCount",
         @"collectedCount",
         @"shareCount",
+        @"likeCount",
+        @"commentCount",
+        @"collectCount",
+        @"sharedCount",
+        @"interactInfo",
+        @"interactionInfo",
+        @"isLiked",
+        @"isCollected",
         @"note_data",
         @"media_data",
         @"cur_position",
@@ -727,6 +735,8 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
         @"videoData", @"videoDataInfo", @"videoUrl", @"identifier",
         @"noteId", @"noteID", @"userId", @"userID", @"title", @"desc",
         @"likedCount", @"commentsCount", @"collectedCount", @"shareCount",
+        @"likeCount", @"commentCount", @"collectCount", @"sharedCount",
+        @"interactInfo", @"interactionInfo", @"isLiked", @"isCollected",
         @"model", @"viewModel", @"contentModel",
         @"cellViewModelList",
         @"downloadButtonTapped:",
@@ -751,7 +761,9 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
     }
     NSSet<NSString *> *noteFieldSelectors = [NSSet setWithArray:@[
         @"noteId", @"noteID", @"userId", @"userID", @"title", @"desc",
-        @"likedCount", @"commentsCount", @"collectedCount", @"shareCount"
+        @"likedCount", @"commentsCount", @"collectedCount", @"shareCount",
+        @"likeCount", @"commentCount", @"collectCount", @"sharedCount",
+        @"interactInfo", @"interactionInfo", @"isLiked", @"isCollected"
     ]];
     if ([noteFieldSelectors containsObject:selectorName]) {
         NSMutableDictionary *field = [NSMutableDictionary dictionaryWithDictionary:
@@ -1437,6 +1449,8 @@ static void XRBInstallMediaFieldHooks(void) {
         @"videoData", @"videoDataInfo", @"videoUrl", @"identifier",
         @"noteId", @"noteID", @"userId", @"userID", @"title", @"desc",
         @"likedCount", @"commentsCount", @"collectedCount", @"shareCount",
+        @"likeCount", @"commentCount", @"collectCount", @"sharedCount",
+        @"interactInfo", @"interactionInfo", @"isLiked", @"isCollected",
         @"cellViewModelList",
         @"downloadButtonTapped:",
         @"mediaBrowserViewModelDidClickDownloadButtonAtIndex:index:"
