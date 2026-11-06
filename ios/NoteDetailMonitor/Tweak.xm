@@ -681,6 +681,7 @@ static void NDMShoppingRouteHook(
     fields[@"extra_class"] = extra
         ? NSStringFromClass(object_getClass(extra))
         : @"<nil>";
+    fields[@"call_stack"] = NDMCallStack();
     fields[@"event"] = @"route_invoked";
     NDMPostEvent(fields);
     if (gShoppingRouteOriginal) {
@@ -795,6 +796,7 @@ static void NDMHomeFeedRouteHook(
     fields[@"channel_class"] = channel
         ? NSStringFromClass(object_getClass(channel))
         : @"<nil>";
+    fields[@"call_stack"] = NDMCallStack();
     fields[@"event"] = @"route_invoked";
     NDMPostEvent(fields);
     NSMutableSet<NSValue *> *seen = [NSMutableSet set];
