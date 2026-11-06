@@ -15,6 +15,8 @@ typedef struct XRBMethodHookEntry {
 
 static XRBMethodHookEntry *gBusinessHooks;
 static pthread_mutex_t gBusinessHooksLock = PTHREAD_MUTEX_INITIALIZER;
+static NSMutableDictionary<NSString *, NSMutableData *> *gNetworkBuffers;
+static pthread_mutex_t gNetworkBuffersLock = PTHREAD_MUTEX_INITIALIZER;
 
 static NSArray<NSString *> *XRBInterestingSelectors(void) {
     return @[
@@ -690,6 +692,164 @@ static void XRBRememberBusinessHook(
     pthread_mutex_unlock(&gBusinessHooksLock);
 }
 
+static NSString *XRBTaskKey(id task) {
+    return [NSString stringWithFormat:@"%p", task];
+}
+
+static BOOL XRBIsAppDelegateClass(Class cls) {
+    NSString *name = NSStringFromClass(cls) ?: @"";
+    if (name.length == 0) return NO;
+    for (NSString *prefix in @[
+        @"NS", @"UI", @"CF", @"NSURL", @"_NS", @"__NS", @"OS"
+    ]) {
+        if ([name hasPrefix:prefix]) return NO;
+    }
+    return YES;
+}
+
+static NSURL *XRBTaskURL(id task) {
+    if (!task) return nil;
+    @try {
+        if ([task respondsToSelector:@selector(originalRequest)]) {
+            NSURLRequest *request = [task originalRequest];
+            if (request.URL) return request.URL;
+        }
+        if ([task respondsToSelector:@selector(currentRequest)]) {
+            NSURLRequest *request = [task currentRequest];
+            return request.URL;
+        }
+    } @catch (__unused NSException *exception) {
+    }
+    return nil;
+}
+
+static void XRBHookURLSessionDidReceiveData(
+    id self,
+    SEL selector,
+    id session,
+    id task,
+    NSData *data
+) {
+    NSURL *URL = XRBTaskURL(task);
+    if (URL && XRBIsLikelyNoteRequest(URL) && data.length > 0) {
+        NSString *key = XRBTaskKey(task);
+        pthread_mutex_lock(&gNetworkBuffersLock);
+        if (!gNetworkBuffers) {
+            gNetworkBuffers = [NSMutableDictionary dictionary];
+        }
+        NSMutableData *buffer = gNetworkBuffers[key];
+        if (!buffer) {
+            buffer = [NSMutableData data];
+            gNetworkBuffers[key] = buffer;
+        }
+        if (buffer.length < (4 * 1024 * 1024)) {
+            NSUInteger remaining = (4 * 1024 * 1024) - buffer.length;
+            [buffer appendBytes:data.bytes
+                         length:MIN(remaining, data.length)];
+        }
+        pthread_mutex_unlock(&gNetworkBuffersLock);
+    }
+
+    IMP original = XRBOriginalImplementation(self, selector);
+    if (original) {
+        ((void (*)(id, SEL, id, id, id))original)(
+            self, selector, session, task, data
+        );
+    }
+}
+
+static void XRBHookURLSessionDidComplete(
+    id self,
+    SEL selector,
+    id session,
+    id task,
+    NSError *error
+) {
+    NSURL *URL = XRBTaskURL(task);
+    NSData *body = nil;
+    if (URL && XRBIsLikelyNoteRequest(URL)) {
+        NSString *key = XRBTaskKey(task);
+        pthread_mutex_lock(&gNetworkBuffersLock);
+        body = [gNetworkBuffers[key] copy];
+        [gNetworkBuffers removeObjectForKey:key];
+        pthread_mutex_unlock(&gNetworkBuffersLock);
+
+        NSMutableDictionary *summary = [NSMutableDictionary
+            dictionaryWithDictionary:XRBResponseSummary(
+                body,
+                [task response],
+                error
+            )];
+        summary[@"url_scheme"] = URL.scheme ?: @"";
+        summary[@"url_host"] = URL.host ?: @"";
+        summary[@"url_path"] = URL.path ?: @"";
+        summary[@"transport"] = @"urlsession_delegate";
+        XRBLogEvent(@"note_detail_response", summary);
+    }
+
+    IMP original = XRBOriginalImplementation(self, selector);
+    if (original) {
+        ((void (*)(id, SEL, id, id, id))original)(
+            self, selector, session, task, error
+        );
+    }
+}
+
+static void XRBInstallURLSessionDelegateObservation(void) {
+    SEL receiveSelector =
+        @selector(URLSession:dataTask:didReceiveData:);
+    SEL completeSelector =
+        @selector(URLSession:task:didCompleteWithError:);
+    int count = objc_getClassList(NULL, 0);
+    if (count <= 0) return;
+    Class __unsafe_unretained *classes =
+        (Class __unsafe_unretained *)calloc((size_t)count, sizeof(Class));
+    count = objc_getClassList(classes, count);
+
+    for (int index = 0; index < count; index++) {
+        Class cls = classes[index];
+        if (!XRBIsAppDelegateClass(cls)) continue;
+        for (SEL selector in @[receiveSelector, completeSelector]) {
+            Method method = XRBDirectMethod(cls, selector);
+            if (!method) continue;
+
+            pthread_mutex_lock(&gBusinessHooksLock);
+            BOOL alreadyInstalled = NO;
+            for (XRBMethodHookEntry *entry = gBusinessHooks;
+                 entry;
+                 entry = entry->next) {
+                if (entry->cls == cls && entry->selector == selector) {
+                    alreadyInstalled = YES;
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&gBusinessHooksLock);
+            if (alreadyInstalled) continue;
+
+            const char *encoding = method_getTypeEncoding(method);
+            IMP replacement = NULL;
+            if (selector == receiveSelector &&
+                strcmp(encoding, "v32@0:8@16@24@32") == 0) {
+                replacement = (IMP)XRBHookURLSessionDidReceiveData;
+            } else if (selector == completeSelector &&
+                       strcmp(encoding, "v32@0:8@16@24@32") == 0) {
+                replacement = (IMP)XRBHookURLSessionDidComplete;
+            } else {
+                continue;
+            }
+
+            IMP original = method_setImplementation(method, replacement);
+            XRBRememberBusinessHook(cls, selector, original);
+            XRBLogEvent(@"network_delegate_hook_installed", @{
+                @"class": NSStringFromClass(cls) ?: @"",
+                @"selector": NSStringFromSelector(selector) ?: @"",
+                @"type_encoding": [NSString stringWithUTF8String:encoding]
+            });
+        }
+    }
+    free(classes);
+}
+
 static void XRBInstallBusinessHook(
     NSString *className,
     NSString *selectorName
@@ -794,6 +954,7 @@ static void XRBInstallBusinessHooks(void) {
 
 static void XRBRescanBusinessHooks(void) {
     XRBInstallBusinessHooks();
+    XRBInstallURLSessionDelegateObservation();
     dispatch_after(
         dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
         dispatch_get_global_queue(QOS_CLASS_UTILITY, 0),
