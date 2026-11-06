@@ -54,6 +54,15 @@ static NSArray<NSString *> *XRBInterestingSelectors(void) {
         @"browserItemOriginUrl",
         @"browserItemFileId",
         @"livePhotoVideoPath",
+        @"originalURL",
+        @"mediaType",
+        @"uniqueID",
+        @"browserItemURL",
+        @"browserItemOriginURL",
+        @"browserItemFileID",
+        @"imageURL",
+        @"photoURL",
+        @"largeImageURL",
         @"image",
         @"video",
         @"imageData",
@@ -557,6 +566,15 @@ static void XRBHookVoidObject(id self, SEL selector, id argument) {
         @"argument_description": XRBShortDescription(argument)
     });
     NSString *selectorName = NSStringFromSelector(selector);
+    if ([selectorName isEqualToString:@"downloadButtonTapped:"]) {
+        XRBLogEvent(@"media_download_action", @{
+            @"class": NSStringFromClass(object_getClass(self)) ?: @"",
+            @"selector": selectorName,
+            @"argument_class": argument
+                ? NSStringFromClass(object_getClass(argument)) : @"<nil>",
+            @"call_stack": XRBCallStack()
+        });
+    }
     if ([selectorName isEqualToString:@"setContentNoteModel:"] ||
         [selectorName isEqualToString:@"setVideoInfo:"] ||
         [selectorName isEqualToString:@"setVideoURL:"] ||
@@ -589,6 +607,28 @@ static void XRBHookVoidObject(id self, SEL selector, id argument) {
     IMP original = XRBOriginalImplementation(self, selector);
     if (original) {
         ((void (*)(id, SEL, id))original)(self, selector, argument);
+    }
+}
+
+static void XRBHookVoidObjectLong(
+    id self,
+    SEL selector,
+    id object,
+    long index
+) {
+    XRBLogEvent(@"media_download_action", @{
+        @"class": NSStringFromClass(object_getClass(self)) ?: @"",
+        @"selector": NSStringFromSelector(selector) ?: @"",
+        @"object_class": object
+            ? NSStringFromClass(object_getClass(object)) : @"<nil>",
+        @"index": @(index),
+        @"call_stack": XRBCallStack()
+    });
+    IMP original = XRBOriginalImplementation(self, selector);
+    if (original) {
+        ((void (*)(id, SEL, id, long))original)(
+            self, selector, object, index
+        );
     }
 }
 
@@ -654,8 +694,13 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
         @"original_url", @"url", @"media_type", @"uniqueId",
         @"browserItemUrl", @"browserItemOriginUrl", @"browserItemFileId",
         @"livePhotoVideoPath", @"id", @"image", @"video", @"imageData",
+        @"originalURL", @"mediaType", @"uniqueID",
+        @"browserItemURL", @"browserItemOriginURL", @"browserItemFileID",
+        @"imageURL", @"photoURL", @"largeImageURL",
         @"videoData", @"videoDataInfo", @"videoUrl", @"identifier",
-        @"cellViewModelList"
+        @"cellViewModelList",
+        @"downloadButtonTapped:",
+        @"mediaBrowserViewModelDidClickDownloadButtonAtIndex:index:"
     ]];
     if ([mediaSelectors containsObject:selectorName]) {
         NSMutableDictionary *media = [NSMutableDictionary
@@ -1178,6 +1223,9 @@ static void XRBInstallBusinessHook(
     } else if (strcmp(encoding, "@32@0:8@16@24") == 0) {
         replacement = (IMP)XRBHookObjectTwoObjects;
         kind = @"object_two_objects";
+    } else if (strcmp(encoding, "v32@0:8@16q24") == 0) {
+        replacement = (IMP)XRBHookVoidObjectLong;
+        kind = @"void_object_long";
     } else if (strcmp(encoding, "@16@0:8") == 0) {
         replacement = (IMP)XRBHookObjectNoArgument;
         kind = @"object_no_argument";
@@ -1302,8 +1350,13 @@ static void XRBInstallMediaFieldHooks(void) {
         @"original_url", @"url", @"media_type", @"uniqueId",
         @"browserItemUrl", @"browserItemOriginUrl", @"browserItemFileId",
         @"livePhotoVideoPath", @"image", @"video", @"imageData",
+        @"originalURL", @"mediaType", @"uniqueID",
+        @"browserItemURL", @"browserItemOriginURL", @"browserItemFileID",
+        @"imageURL", @"photoURL", @"largeImageURL",
         @"videoData", @"videoDataInfo", @"videoUrl", @"identifier",
-        @"cellViewModelList"
+        @"cellViewModelList",
+        @"downloadButtonTapped:",
+        @"mediaBrowserViewModelDidClickDownloadButtonAtIndex:index:"
     ];
     int count = objc_getClassList(NULL, 0);
     if (count <= 0) return;
