@@ -30,7 +30,17 @@ static NSArray<NSString *> *XRBInterestingSelectors(void) {
         @"preloadNoteDetailsWith:userInfo:",
         @"openNoteDetailWithNoteID:",
         @"setContentNoteModel:",
-        @"contentNoteModel"
+        @"contentNoteModel",
+        @"imagesList",
+        @"videoURLs",
+        @"videoURL",
+        @"videoInfo",
+        @"sourcesWithPrimaryURL:context:",
+        @"setVideoInfo:",
+        @"setVideoURL:",
+        @"setVideoURLs:",
+        @"setNote:",
+        @"setViewModel:"
     ];
 }
 
@@ -484,6 +494,11 @@ static void XRBHookVoidObject(id self, SEL selector, id argument) {
     });
     NSString *selectorName = NSStringFromSelector(selector);
     if ([selectorName isEqualToString:@"setContentNoteModel:"] ||
+        [selectorName isEqualToString:@"setVideoInfo:"] ||
+        [selectorName isEqualToString:@"setVideoURL:"] ||
+        [selectorName isEqualToString:@"setVideoURLs:"] ||
+        [selectorName isEqualToString:@"setNote:"] ||
+        [selectorName isEqualToString:@"setViewModel:"] ||
         [selectorName isEqualToString:@"setNote:"] ||
         [selectorName isEqualToString:@"setNoteModel:"] ||
         [selectorName isEqualToString:@"setNoteDetail:"] ||
@@ -529,6 +544,41 @@ static id XRBHookObjectObject(id self, SEL selector, id argument) {
     return result;
 }
 
+static id XRBHookObjectTwoObjects(
+    id self,
+    SEL selector,
+    id first,
+    id second
+) {
+    XRBLogBusinessEnter(self, selector, @{
+        @"first_argument_class": first
+            ? NSStringFromClass(object_getClass(first)) : @"<nil>",
+        @"second_argument_class": second
+            ? NSStringFromClass(object_getClass(second)) : @"<nil>"
+    });
+    IMP original = XRBOriginalImplementation(self, selector);
+    if (!original) return nil;
+    id result = ((id (*)(id, SEL, id, id))original)(
+        self, selector, first, second
+    );
+    NSMutableDictionary *summary = [NSMutableDictionary
+        dictionaryWithDictionary:XRBModelSummary(result)];
+    summary[@"class"] = NSStringFromClass(object_getClass(self)) ?: @"";
+    summary[@"selector"] = NSStringFromSelector(selector) ?: @"";
+    summary[@"result_class"] = result
+        ? NSStringFromClass(object_getClass(result)) : @"<nil>";
+    if (result) {
+        NSMutableSet<NSValue *> *seen = [NSMutableSet set];
+        NSUInteger budget = 500;
+        summary[@"snapshot"] = XRBDeepSnapshot(
+            result, 0, seen, &budget
+        ) ?: [NSNull null];
+        summary[@"remaining_budget"] = @(budget);
+    }
+    XRBLogEvent(@"note_media_field_received", summary);
+    return result;
+}
+
 static id XRBHookObjectNoArgument(id self, SEL selector) {
     XRBLogBusinessEnter(self, selector, nil);
     IMP original = XRBOriginalImplementation(self, selector);
@@ -536,6 +586,10 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
     id result = ((id (*)(id, SEL))original)(self, selector);
     NSString *selectorName = NSStringFromSelector(selector);
     if ([selectorName isEqualToString:@"contentNoteModel"] ||
+        [selectorName isEqualToString:@"imagesList"] ||
+        [selectorName isEqualToString:@"videoURLs"] ||
+        [selectorName isEqualToString:@"videoURL"] ||
+        [selectorName isEqualToString:@"videoInfo"] ||
         [selectorName isEqualToString:@"noteDetailModel"] ||
         [selectorName isEqualToString:@"noteDetail"] ||
         [selectorName isEqualToString:@"noteModel"] ||
@@ -546,6 +600,18 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
         summary[@"getter_class"] = NSStringFromClass(object_getClass(self))
             ?: @"";
         XRBLogEvent(@"note_model_received", summary);
+        if ([selectorName isEqualToString:@"imagesList"] ||
+            [selectorName isEqualToString:@"videoURLs"] ||
+            [selectorName isEqualToString:@"videoURL"] ||
+            [selectorName isEqualToString:@"videoInfo"]) {
+            NSMutableSet<NSValue *> *seen = [NSMutableSet set];
+            NSUInteger budget = 500;
+            summary[@"snapshot"] = XRBDeepSnapshot(
+                result, 0, seen, &budget
+            ) ?: [NSNull null];
+            summary[@"remaining_budget"] = @(budget);
+            XRBLogEvent(@"note_media_field_received", summary);
+        }
     }
     XRBLogEvent(@"business_method_exit", @{
         @"class": NSStringFromClass(object_getClass(self)) ?: @"",
@@ -1008,6 +1074,9 @@ static void XRBInstallBusinessHook(
     } else if (strcmp(encoding, "@24@0:8@16") == 0) {
         replacement = (IMP)XRBHookObjectObject;
         kind = @"object_object";
+    } else if (strcmp(encoding, "@32@0:8@16@24") == 0) {
+        replacement = (IMP)XRBHookObjectTwoObjects;
+        kind = @"object_two_objects";
     } else if (strcmp(encoding, "@16@0:8") == 0) {
         replacement = (IMP)XRBHookObjectNoArgument;
         kind = @"object_no_argument";
@@ -1090,8 +1159,56 @@ static void XRBInstallBusinessHooks(void) {
     }
 }
 
+static BOOL XRBShouldScanMediaClass(Class cls) {
+    NSString *name = NSStringFromClass(cls) ?: @"";
+    if (name.length == 0 || [name hasPrefix:@"XHS"]) return NO;
+    for (NSString *prefix in @[
+        @"NS", @"UI", @"CF", @"AF", @"NSURL", @"_NS", @"__NS"
+    ]) {
+        if ([name hasPrefix:prefix]) return NO;
+    }
+    for (NSString *term in @[
+        @"XY", @"Note", @"Feed", @"Video", @"Image", @"Content",
+        @"Detail", @"Shopping", @"WorldSnake", @"Commercial"
+    ]) {
+        if ([name containsString:term]) return YES;
+    }
+    return NO;
+}
+
+static void XRBInstallMediaFieldHooks(void) {
+    NSArray<NSString *> *selectors = @[
+        @"contentNoteModel",
+        @"imagesList",
+        @"videoURLs",
+        @"videoURL",
+        @"videoInfo",
+        @"sourcesWithPrimaryURL:context:",
+        @"setVideoInfo:",
+        @"setVideoURL:",
+        @"setVideoURLs:",
+        @"setNote:",
+        @"setViewModel:"
+    ];
+    int count = objc_getClassList(NULL, 0);
+    if (count <= 0) return;
+    Class __unsafe_unretained *classes =
+        (Class __unsafe_unretained *)calloc((size_t)count, sizeof(Class));
+    count = objc_getClassList(classes, count);
+    for (int index = 0; index < count; index++) {
+        Class cls = classes[index];
+        if (!XRBShouldScanMediaClass(cls)) continue;
+        NSString *className = NSStringFromClass(cls);
+        for (NSString *selectorName in selectors) {
+            XRBInstallBusinessHook(className, selectorName);
+        }
+    }
+    free(classes);
+}
+
 static void XRBRescanBusinessHooks(void) {
     XRBInstallBusinessHooks();
+    XRBInstallMediaFieldHooks();
     XRBInstallURLSessionDelegateObservation();
     dispatch_after(
         dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
