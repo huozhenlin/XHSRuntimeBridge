@@ -254,17 +254,17 @@ static void NDMReportImageBrowserMedia(
         @"live_photo_video_file_id": fileID ?: [NSNull null],
         @"call_stack": NDMCallStack()
     }];
-    NSUInteger cellBudget = 500;
+    NSUInteger cellBudget = 140;
     event[@"cell_snapshot"] = NDMDeepSnapshot(
         cell, 0, [NSMutableSet set], &cellBudget
     ) ?: [NSNull null];
     event[@"cell_remaining_budget"] = @(cellBudget);
-    NSUInteger assetBudget = 300;
+    NSUInteger assetBudget = 80;
     event[@"asset_snapshot"] = NDMDeepSnapshot(
         asset, 0, [NSMutableSet set], &assetBudget
     ) ?: [NSNull null];
     event[@"asset_remaining_budget"] = @(assetBudget);
-    NSUInteger browserBudget = 180;
+    NSUInteger browserBudget = 60;
     event[@"browser_snapshot"] = NDMDeepSnapshot(
         browser, 0, [NSMutableSet set], &browserBudget
     ) ?: [NSNull null];
@@ -806,6 +806,14 @@ static id NDMDeepSnapshot(
         return text.length > 2048 ? [text substringToIndex:2048] : text;
     }
     if ([object isKindOfClass:NSURL.class]) return [object absoluteString];
+    NSString *className = NSStringFromClass(object_getClass(object)) ?: @"";
+    for (NSString *prefix in @[
+        @"NS", @"UI", @"CF", @"CG", @"CA", @"AV", @"PH", @"NSURL"
+    ]) {
+        if ([className hasPrefix:prefix]) {
+            return @{@"__class": className};
+        }
+    }
     if ([object isKindOfClass:NSArray.class]) {
         NSMutableArray *values = [NSMutableArray array];
         NSUInteger count = MIN((NSUInteger)[(NSArray *)object count],
@@ -860,6 +868,23 @@ static id NDMDeepSnapshot(
             const char *rawName = property_getName(properties[index]);
             if (!rawName) continue;
             NSString *name = [NSString stringWithUTF8String:rawName];
+            NSString *lower = name.lowercaseString;
+            BOOL safe = [lower containsString:@"note"] ||
+                [lower containsString:@"user"] ||
+                [lower containsString:@"author"] ||
+                [lower containsString:@"title"] ||
+                [lower containsString:@"desc"] ||
+                [lower containsString:@"url"] ||
+                [lower containsString:@"image"] ||
+                [lower containsString:@"video"] ||
+                [lower containsString:@"media"] ||
+                [lower containsString:@"model"] ||
+                [lower containsString:@"data"] ||
+                [lower containsString:@"info"] ||
+                [lower containsString:@"count"] ||
+                [lower isEqualToString:@"id"] ||
+                [lower containsString:@"source"];
+            if (!safe) continue;
             @try {
                 id value = [object valueForKey:name];
                 if (value) values[name] = NDMDeepSnapshot(
@@ -1108,7 +1133,7 @@ static void NDMCurrentImageIDSetter(id self, SEL selector, id value) {
     );
     id displayImage = NDMReadKnownValue(self, @"displayImage");
     if (displayImage) {
-        NSUInteger budget = 400;
+        NSUInteger budget = 160;
         NSMutableDictionary *event = [NSMutableDictionary
             dictionaryWithDictionary:@{
                 @"event": @"image_display_resolved",

@@ -343,6 +343,14 @@ static id XRBDeepSnapshot(
     if ([object isKindOfClass:NSURL.class]) {
         return [object absoluteString] ?: @"";
     }
+    NSString *objectClassName = NSStringFromClass(object_getClass(object)) ?: @"";
+    for (NSString *prefix in @[
+        @"NS", @"UI", @"CF", @"CG", @"CA", @"AV", @"PH", @"NSURL"
+    ]) {
+        if ([objectClassName hasPrefix:prefix]) {
+            return @{@"__class": objectClassName};
+        }
+    }
     if ([object isKindOfClass:NSArray.class]) {
         NSMutableArray *array = [NSMutableArray array];
         NSUInteger count = MIN((NSUInteger)[(NSArray *)object count], (NSUInteger)64);
@@ -384,7 +392,25 @@ static id XRBDeepSnapshot(
         objc_property_t *properties = class_copyPropertyList(cls, &count);
         for (unsigned int index = 0; index < count; index++) {
             const char *name = property_getName(properties[index]);
-            if (name) [propertyNames addObject:[NSString stringWithUTF8String:name]];
+            if (!name) continue;
+            NSString *propertyName = [NSString stringWithUTF8String:name];
+            NSString *lower = propertyName.lowercaseString;
+            BOOL safe = [lower containsString:@"note"] ||
+                [lower containsString:@"user"] ||
+                [lower containsString:@"author"] ||
+                [lower containsString:@"title"] ||
+                [lower containsString:@"desc"] ||
+                [lower containsString:@"url"] ||
+                [lower containsString:@"image"] ||
+                [lower containsString:@"video"] ||
+                [lower containsString:@"media"] ||
+                [lower containsString:@"model"] ||
+                [lower containsString:@"data"] ||
+                [lower containsString:@"info"] ||
+                [lower containsString:@"count"] ||
+                [lower isEqualToString:@"id"] ||
+                [lower containsString:@"source"];
+            if (safe) [propertyNames addObject:propertyName];
         }
         free(properties);
     }
@@ -619,7 +645,7 @@ static void XRBHookVoidObject(id self, SEL selector, id argument) {
             ?: @"";
         XRBLogEvent(@"note_model_received", summary);
         NSMutableSet<NSValue *> *seen = [NSMutableSet set];
-        NSUInteger budget = 600;
+        NSUInteger budget = 240;
         XRBLogEvent(@"note_model_dump", @{
             @"model_class": NSStringFromClass(object_getClass(argument))
                 ?: @"",
@@ -751,7 +777,7 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
             ?: @"";
         if (result) {
             NSMutableSet<NSValue *> *seen = [NSMutableSet set];
-            NSUInteger budget = 600;
+            NSUInteger budget = 240;
             media[@"snapshot"] = XRBDeepSnapshot(
                 result, 0, seen, &budget
             ) ?: [NSNull null];
@@ -797,7 +823,7 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
             ?: @"";
         if (result) {
             NSMutableSet<NSValue *> *seen = [NSMutableSet set];
-            NSUInteger budget = 1200;
+            NSUInteger budget = 400;
             summary[@"snapshot"] = XRBDeepSnapshot(
                 result, 0, seen, &budget
             ) ?: [NSNull null];
@@ -856,7 +882,7 @@ static void XRBHookObjectCompletion(
 
             if (result) {
                 NSMutableSet<NSValue *> *seen = [NSMutableSet set];
-                NSUInteger budget = 600;
+                NSUInteger budget = 240;
                 XRBLogEvent(@"note_model_completion_dump", @{
                     @"class": NSStringFromClass(object_getClass(self))
                         ?: @"",
@@ -911,7 +937,7 @@ static void XRBHookCompletionOnly(
 
         if (result) {
             NSMutableSet<NSValue *> *seen = [NSMutableSet set];
-            NSUInteger budget = 600;
+            NSUInteger budget = 240;
             XRBLogEvent(@"note_model_completion_dump", @{
                 @"class": NSStringFromClass(object_getClass(self)) ?: @"",
                 @"selector": NSStringFromSelector(selector) ?: @"",
