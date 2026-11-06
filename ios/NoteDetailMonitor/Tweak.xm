@@ -1975,37 +1975,6 @@ static void NDMInstallImageBrowserHooks(void) {
     }
 }
 
-%group ImageBrowserMediaTrace
-
-%hook _TtC11XYNoteBasic7IBViewModel
-
-- (void)recordImageLoadFirstStartWithIndex:(long long)index
-                                       url:(id)url {
-    id browser = NDMReadKnownValue(self, @"imageBrowser");
-    NDMReportImageBrowserMedia(browser, nil, index, url);
-    %orig;
-}
-
-%end
-
-%hook _TtC11XYNoteBasic12ImageBrowser
-
-- (void)collectionView:(UICollectionView *)collectionView
-       willDisplayCell:(UICollectionViewCell *)cell
-    forItemAtIndexPath:(NSIndexPath *)indexPath {
-    NDMReportImageBrowserMedia(
-        self,
-        cell,
-        (long long)indexPath.item,
-        nil
-    );
-    %orig;
-}
-
-%end
-
-%end
-
 %group NoteDetailNavigation
 
 %hook UINavigationController
