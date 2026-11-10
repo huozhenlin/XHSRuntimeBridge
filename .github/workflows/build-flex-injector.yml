@@ -1,0 +1,91 @@
+name: Build official FLEX Injector
+
+on:
+  workflow_dispatch:
+    inputs:
+      flex_ref:
+        description: "Official FLEX tag or commit"
+        required: true
+        default: "5.22.10"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-flex-injector.yml"
+      - "ios/FLEXInjector/**"
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select official FLEX revision
+        id: flex
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.flex_ref }}" ]; then
+            echo "ref=${{ github.event.inputs.flex_ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=5.22.10" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch official FLEX source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ios/FLEXInjector/Vendor
+          git clone --depth 1 --branch "${{ steps.flex.outputs.ref }}" \
+            https://github.com/FLEXTool/FLEX.git ios/FLEXInjector/Vendor/FLEX
+          git -C ios/FLEXInjector/Vendor/FLEX rev-parse HEAD > ios/FLEXInjector/Vendor/FLEX_COMMIT
+
+      - name: Install Theos
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$GITHUB_WORKSPACE/.theos-sdk"
+          brew install ldid xz
+
+      - name: Build injectable dylib
+        working-directory: ios/FLEXInjector
+        env:
+          THEOS: ${{ github.workspace }}/.theos-sdk
+        shell: bash
+        run: |
+          set +e
+          make clean 2>&1 | tee build.log
+          make FINALPACKAGE=1 2>&1 | tee -a build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            tail -n 120 build.log
+            exit "$status"
+          fi
+          test -f .theos/obj/arm64/FLEXInjector.dylib
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/FLEXInjector
+          cp ios/FLEXInjector/.theos/obj/arm64/FLEXInjector.dylib \
+            artifacts/FLEXInjector/FLEXInjector.dylib
+          cp ios/FLEXInjector/Vendor/FLEX/LICENSE artifacts/FLEXInjector/FLEX-LICENSE.txt
+          cp ios/FLEXInjector/Vendor/FLEX_COMMIT artifacts/FLEXInjector/FLEX_COMMIT
+          cat > artifacts/FLEXInjector/README.txt <<'EOF'
+          Official FLEX 5.22.10 packaged as an injectable dylib.
+
+          Target: iOS 15+, arm64/arm64e
+          Bootstrap: shows FLEX once about two seconds after app launch.
+          Inject this dylib only into an app you own or are authorized to test.
+          EOF
+          ditto -c -k --sequesterRsrc --keepParent \
+            artifacts/FLEXInjector artifacts/FLEXInjector.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FLEXInjector
+          path: artifacts/
+          if-no-files-found: error
