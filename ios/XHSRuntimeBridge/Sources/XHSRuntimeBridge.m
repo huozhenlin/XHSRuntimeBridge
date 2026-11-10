@@ -236,6 +236,12 @@ static id XRBReadField(id object, NSString *key) {
     if ([object isKindOfClass:NSDictionary.class]) {
         return [(NSDictionary *)object objectForKey:key];
     }
+    if ([object respondsToSelector:@selector(objectForKey:)]) {
+        @try {
+            return [object objectForKey:key];
+        } @catch (__unused NSException *exception) {
+        }
+    }
     Class cls = object_getClass(object);
     SEL selector = NSSelectorFromString(key);
     Method method = class_getInstanceMethod(cls, selector);
@@ -255,6 +261,89 @@ static id XRBFirstField(id object, NSArray<NSString *> *keys) {
         if (value) return value;
     }
     return nil;
+}
+
+static void XRBCollectSchemaURLs(
+    id value,
+    NSMutableArray<NSString *> *urls,
+    NSUInteger depth
+) {
+    if (!value || depth > 4 || urls.count >= 64) return;
+    if ([value isKindOfClass:NSString.class]) {
+        if ([value hasPrefix:@"http"]) [urls addObject:value];
+        return;
+    }
+    if ([value isKindOfClass:NSArray.class]) {
+        for (id child in (NSArray *)value) {
+            XRBCollectSchemaURLs(child, urls, depth + 1);
+            if (urls.count >= 64) break;
+        }
+        return;
+    }
+    for (NSString *key in @[
+        @"url", @"url_default", @"url_pre", @"original_url",
+        @"master_url", @"backup_urls", @"info_list", @"media", @"stream"
+    ]) {
+        XRBCollectSchemaURLs(
+            XRBReadField(value, key), urls, depth + 1
+        );
+    }
+}
+
+static NSDictionary *XRBWebSchemaNoteSummary(id root) {
+    if (!root) return @{};
+    id noteCard = XRBReadField(root, @"note_card");
+    if (!noteCard) noteCard = XRBReadField(root, @"noteCard");
+    if (!noteCard) {
+        id data = XRBReadField(root, @"data");
+        id items = XRBReadField(data, @"items");
+        if ([items isKindOfClass:NSArray.class]) {
+            noteCard = XRBReadField(
+                [(NSArray *)items firstObject], @"note_card"
+            );
+        }
+    }
+    if (!noteCard) noteCard = root;
+
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    for (NSArray<NSString *> *field in @[
+        @[@"id", @"note_id"],
+        @[@"note_id", @"note_id"],
+        @[@"title", @"title"],
+        @[@"desc", @"desc"],
+        @[@"type", @"type"],
+        @[@"time", @"time"],
+        @[@"ip_location", @"ip_location"]
+    ]) {
+        id value = XRBReadField(noteCard, field[0]);
+        if (value) result[field[1]] = value;
+    }
+
+    id user = XRBReadField(noteCard, @"user");
+    if (user) {
+        NSMutableDictionary *author = [NSMutableDictionary dictionary];
+        id userID = XRBReadField(user, @"user_id");
+        id nickname = XRBReadField(user, @"nickname");
+        if (userID) author[@"user_id"] = userID;
+        if (nickname) author[@"nickname"] = nickname;
+        if (author.count) result[@"author"] = author;
+    }
+
+    id interact = XRBReadField(noteCard, @"interact_info");
+    if (interact) result[@"interact_info"] = interact;
+
+    NSMutableArray<NSString *> *imageURLs = [NSMutableArray array];
+    XRBCollectSchemaURLs(
+        XRBReadField(noteCard, @"image_list"), imageURLs, 0
+    );
+    if (imageURLs.count) result[@"image_urls"] = imageURLs;
+
+    NSMutableArray<NSString *> *videoURLs = [NSMutableArray array];
+    XRBCollectSchemaURLs(
+        XRBReadField(noteCard, @"video"), videoURLs, 0
+    );
+    if (videoURLs.count) result[@"video_urls"] = videoURLs;
+    return result;
 }
 
 static NSString *XRBTruncateString(NSString *value, NSUInteger limit) {
@@ -642,6 +731,7 @@ static void XRBHookVoidObject(id self, SEL selector, id argument) {
         [selectorName isEqualToString:@"setData:"]) {
         NSMutableDictionary *summary = [NSMutableDictionary
             dictionaryWithDictionary:XRBModelSummary(argument)];
+        summary[@"web_schema_summary"] = XRBWebSchemaNoteSummary(argument);
         summary[@"setter"] = selectorName;
         summary[@"setter_class"] = NSStringFromClass(object_getClass(self))
             ?: @"";
@@ -689,6 +779,7 @@ static BOOL XRBHookBoolObject(id self, SEL selector, id argument) {
         @"selector": NSStringFromSelector(selector) ?: @"",
         @"success": @(result),
         @"model_fields": XRBModelSummary(self),
+        @"web_schema_summary": XRBWebSchemaNoteSummary(argument),
         @"call_stack": XRBCallStack()
     }];
     if (argument) {
@@ -760,6 +851,7 @@ static id XRBHookObjectTwoObjects(
     );
     NSMutableDictionary *summary = [NSMutableDictionary
         dictionaryWithDictionary:XRBModelSummary(result)];
+    summary[@"web_schema_summary"] = XRBWebSchemaNoteSummary(result);
     summary[@"class"] = NSStringFromClass(object_getClass(self)) ?: @"";
     summary[@"selector"] = NSStringFromSelector(selector) ?: @"";
     summary[@"result_class"] = result
@@ -852,6 +944,7 @@ static id XRBHookObjectNoArgument(id self, SEL selector) {
         [selectorName isEqualToString:@"data"]) {
         NSMutableDictionary *summary = [NSMutableDictionary
             dictionaryWithDictionary:XRBModelSummary(result)];
+        summary[@"web_schema_summary"] = XRBWebSchemaNoteSummary(result);
         summary[@"getter"] = selectorName;
         summary[@"getter_class"] = NSStringFromClass(object_getClass(self))
             ?: @"";
