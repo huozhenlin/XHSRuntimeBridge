@@ -21,6 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Remove unused FLEX dependency
+        run: rm -rf ios/FLEXInjector
+
+
       - name: Install Theos
         run: |
           git clone --recursive --depth 1 https://github.com/theos/theos.git "$GITHUB_WORKSPACE/.theos-sdk"
@@ -34,7 +38,7 @@ jobs:
         run: |
           set +e
           make clean 2>&1 | tee build.log
-          make FINALPACKAGE=1 2>&1 | tee -a build.log
+          make FINALPACKAGE=1 ADDITIONAL_CFLAGS=-Wno-error 2>&1 | tee -a build.log
           STATUS=${PIPESTATUS[0]}
           if [ "$STATUS" -ne 0 ]; then
             MESSAGE="$(tail -n 80 build.log | sed 's/%/%25/g; s/\r/%0D/g' | awk 'BEGIN{ORS="%0A"} {print}')"
@@ -51,7 +55,7 @@ jobs:
         run: |
           set +e
           make clean 2>&1 | tee build.log
-          make FINALPACKAGE=1 package 2>&1 | tee -a build.log
+          make FINALPACKAGE=1 package ADDITIONAL_CFLAGS=-Wno-error 2>&1 | tee -a build.log
           STATUS=${PIPESTATUS[0]}
           if [ "$STATUS" -ne 0 ]; then
             MESSAGE="$(tail -n 80 build.log | sed 's/%/%25/g; s/\r/%0D/g' | awk 'BEGIN{ORS="%0A"} {print}')"

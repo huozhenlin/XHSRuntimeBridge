@@ -219,20 +219,28 @@ class CollectorHandler(BaseHTTPRequestHandler):
             command = str(payload.get("command", ""))
             note_id = str(payload.get("note_id", ""))
             strategy = str(payload.get("strategy", "auto"))
-            note_type = str(payload.get("type", "normal"))
-            if command not in ("open_note", "fetch_note") or not note_id:
+            if command == "go_back":
+                command_payload = {
+                    "command": command,
+                    "request_id": str(
+                        payload.get("request_id")
+                        or f"req-{int(datetime.now().timestamp() * 1000)}"
+                    ),
+                    "queued_at": datetime.now(timezone.utc).isoformat(),
+                }
+                self.server.store.enqueue_command(command_payload)
+                print(f"[command] queued {command_payload['request_id']} go_back")
+                self._json_response(HTTPStatus.ACCEPTED, {"ok": True, "request_id": command_payload["request_id"]})
+                return
+            if command != "open_note" or not note_id:
                 self._json_response(
                     HTTPStatus.BAD_REQUEST,
-                    {
-                        "ok": False,
-                        "error": "expected open_note/fetch_note and note_id",
-                    },
+                    {"ok": False, "error": "expected open_note with note_id, or go_back"},
                 )
                 return
             command_payload = {
                 "command": command,
                 "note_id": note_id,
-                "type": note_type if note_type in ("normal", "video") else "normal",
                 "strategy": strategy,
                 "request_id": str(
                     payload.get("request_id")

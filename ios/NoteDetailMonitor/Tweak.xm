@@ -18,7 +18,6 @@ static SEL gRouteSelector;
 static IMP gRouteOriginal;
 static BOOL gRouteReturnsObject;
 static NSString *gPendingRequestID;
-static NSString *gPendingNoteID;
 static IMP gShoppingRouteOriginal;
 static IMP gHomeFeedRouteOriginal;
 static IMP gCommercialWSROriginal;
@@ -27,18 +26,7 @@ static IMP gWidgetModelOriginal;
 static IMP gPickDataOriginal;
 static IMP gWidgetModelSetterOriginal;
 static IMP gPickDataSetterOriginal;
-static IMP gDisplayImageOriginal;
-static IMP gDisplayImageSetterOriginal;
-static IMP gCurrentImageIDOriginal;
-static IMP gCurrentImageIDSetterOriginal;
-static IMP gWidgetInjectOriginal;
-static IMP gWidgetInjectDictOriginal;
-static IMP gImageCacheStoreSetterOriginal;
-static IMP gImageRestoreOriginal;
-static IMP gImageBrowserRecordLoadOriginal;
-static IMP gImageBrowserWillDisplayOriginal;
 static void NDMInstallDetailViewModelHooks(void);
-static void NDMInstallImageBrowserHooks(void);
 
 static os_log_t NDMLog(void) {
     static os_log_t log;
@@ -186,93 +174,6 @@ static void NDMPostEvent(NSDictionary *event) {
     [task resume];
 }
 
-static id NDMReadKnownValue(id object, NSString *key);
-static NSArray<NSString *> *NDMCallStack(void);
-static NSDictionary *NDMTraceContext(id object);
-static id NDMDeepSnapshot(
-    id object,
-    NSUInteger depth,
-    NSMutableSet<NSValue *> *seen,
-    NSUInteger *budget
-);
-
-static NSString *NDMURLString(id value) {
-    if ([value isKindOfClass:NSURL.class]) {
-        return [(NSURL *)value absoluteString];
-    }
-    if ([value isKindOfClass:NSString.class]) {
-        return value;
-    }
-    return nil;
-}
-
-static void NDMReportImageBrowserMedia(
-    id browser,
-    id cell,
-    long long index,
-    id directURL
-) {
-    id asset = NDMReadKnownValue(cell, @"asset");
-    NSString *noteID = NDMShortString(NDMReadKnownValue(browser, @"noteId"));
-    if (noteID.length == 0) {
-        noteID = gPendingNoteID;
-    }
-
-    NSString *url = NDMURLString(directURL);
-    if (url.length == 0) {
-        url = NDMURLString(NDMReadKnownValue(cell, @"url"));
-    }
-    if (url.length == 0) {
-        url = NDMURLString(NDMReadKnownValue(cell, @"originalUrl"));
-    }
-    if (url.length == 0) {
-        url = NDMURLString(NDMReadKnownValue(cell, @"weakUrl"));
-    }
-
-    NSString *liveVideo = NDMURLString(
-        NDMReadKnownValue(asset, @"livePhotoVideoURL")
-    );
-    NSString *liveImage = NDMURLString(
-        NDMReadKnownValue(asset, @"livePhotoImageURL")
-    );
-    id fileID = NDMReadKnownValue(asset, @"livePhotoVideoFileId");
-
-    if (url.length == 0 && liveVideo.length == 0 && liveImage.length == 0) {
-        return;
-    }
-
-    NSMutableDictionary *event = [NSMutableDictionary dictionaryWithDictionary:@{
-        @"event": @"image_media_observed",
-        @"source": @"ImageBrowser",
-        @"note_id": noteID ?: [NSNull null],
-        @"index": @(index),
-        @"cell_class": cell
-            ? NSStringFromClass(object_getClass(cell)) : @"<nil>",
-        @"url": url ?: [NSNull null],
-        @"live_photo_video_url": liveVideo ?: [NSNull null],
-        @"live_photo_image_url": liveImage ?: [NSNull null],
-        @"live_photo_video_file_id": fileID ?: [NSNull null],
-        @"call_stack": NDMCallStack()
-    }];
-    NSUInteger cellBudget = 140;
-    event[@"cell_snapshot"] = NDMDeepSnapshot(
-        cell, 0, [NSMutableSet set], &cellBudget
-    ) ?: [NSNull null];
-    event[@"cell_remaining_budget"] = @(cellBudget);
-    NSUInteger assetBudget = 80;
-    event[@"asset_snapshot"] = NDMDeepSnapshot(
-        asset, 0, [NSMutableSet set], &assetBudget
-    ) ?: [NSNull null];
-    event[@"asset_remaining_budget"] = @(assetBudget);
-    NSUInteger browserBudget = 60;
-    event[@"browser_snapshot"] = NDMDeepSnapshot(
-        browser, 0, [NSMutableSet set], &browserBudget
-    ) ?: [NSNull null];
-    event[@"browser_remaining_budget"] = @(browserBudget);
-    [event addEntriesFromDictionary:NDMTraceContext(browser)];
-    NDMPostEvent(event);
-}
-
 static BOOL NDMIsSensitiveKey(NSString *key) {
     NSString *normalized = [[key lowercaseString]
         stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
@@ -290,12 +191,7 @@ static NSArray<NSString *> *NDMKeys(void) {
         @"source", @"sourceType", @"source_type", @"sourceId",
         @"sourceIDForRouter", @"scene", @"entry",
         @"from", @"entrance", @"pageSource", @"openSource",
-        @"feedId", @"feed_id",
-        @"title", @"desc", @"description",
-        @"likedCount", @"commentsCount", @"collectedCount",
-        @"shareCount", @"likeCount", @"commentCount",
-        @"collectCount", @"sharedCount",
-        @"isLiked", @"isCollected", @"interactInfo", @"interactionInfo"
+        @"feedId", @"feed_id"
     ];
 }
 
@@ -324,13 +220,12 @@ static id NDMReadKnownValue(id object, NSString *key) {
     }
 
     Class cls = object_getClass(object);
-    if (NDMHasDirectGetter(cls, key)) {
-        @try {
-            return [object valueForKey:key];
-        } @catch (__unused NSException *exception) {
-        }
+    if (!NDMHasDirectGetter(cls, key)) return nil;
+    @try {
+        return [object valueForKey:key];
+    } @catch (__unused NSException *exception) {
+        return nil;
     }
-    return nil;
 }
 
 static NSDictionary *NDMExtractBusinessFields(id object) {
@@ -364,21 +259,6 @@ static NSDictionary *NDMExtractBusinessFields(id object) {
             outputKey = @"source";
         } else if ([normalized containsString:@"feed"]) {
             outputKey = @"feed_id";
-        } else if ([normalized isEqualToString:@"title"]) {
-            outputKey = @"title";
-        } else if ([normalized isEqualToString:@"desc"] ||
-                   [normalized isEqualToString:@"description"]) {
-            outputKey = @"desc";
-        } else if ([normalized containsString:@"like"]) {
-            outputKey = @"liked_count";
-        } else if ([normalized containsString:@"comment"]) {
-            outputKey = @"comments_count";
-        } else if ([normalized containsString:@"collect"]) {
-            outputKey = @"collected_count";
-        } else if ([normalized containsString:@"share"]) {
-            outputKey = @"share_count";
-        } else if ([normalized containsString:@"interact"]) {
-            outputKey = @"interact_info";
         } else if ([normalized containsString:@"router"] ||
                    [normalized containsString:@"route"]) {
             outputKey = @"router_params";
@@ -469,38 +349,10 @@ static NSArray<NSString *> *NDMCallStack(void) {
     return count > 0 ? [symbols subarrayWithRange:NSMakeRange(0, count)] : @[];
 }
 
-static NSDictionary *NDMTraceContext(id object) {
-    NSMutableDictionary *context = [NSMutableDictionary dictionary];
-    if (gPendingRequestID.length > 0) {
-        context[@"request_id"] = gPendingRequestID;
-    }
-    NSString *noteID = gPendingNoteID;
-    if (noteID.length == 0 && object) {
-        id value = NDMReadKnownValue(object, @"noteId");
-        if ([value isKindOfClass:NSString.class]) {
-            noteID = value;
-        }
-    }
-    if (noteID.length > 0) {
-        context[@"note_id_context"] = noteID;
-    }
-    return context;
-}
-
 static NSArray<NSString *> *NDMDictionaryKeys(id value) {
-    if (!value) return @[];
+    if (![value isKindOfClass:NSDictionary.class]) return @[];
     NSMutableArray<NSString *> *keys = [NSMutableArray array];
-    NSArray *rawKeys = nil;
-    if ([value isKindOfClass:NSDictionary.class]) {
-        rawKeys = [(NSDictionary *)value allKeys];
-    } else if ([value respondsToSelector:@selector(allKeys)]) {
-        @try {
-            rawKeys = [value allKeys];
-        } @catch (__unused NSException *exception) {
-            rawKeys = nil;
-        }
-    }
-    for (id key in rawKeys ?: @[]) {
+    for (id key in [(NSDictionary *)value allKeys]) {
         NSString *text = [key description] ?: @"";
         if (!NDMIsSensitiveKey(text) && text.length > 0) {
             [keys addObject:text];
@@ -515,118 +367,6 @@ static BOOL NDMLooksLikeDetailController(UIViewController *controller) {
     return [name containsString:@"notedetail"] ||
         [name containsString:@"note_detail"] ||
         [name containsString:@"detailviewcontroller"];
-}
-
-static BOOL NDMLooksLikeAuthController(UIViewController *controller) {
-    NSString *name = NDMControllerName(controller).lowercaseString;
-    return [name containsString:@"login"] ||
-        [name containsString:@"signin"] ||
-        [name containsString:@"verify"] ||
-        [name containsString:@"captcha"] ||
-        [name containsString:@"account"];
-}
-
-static id NDMDeepSnapshot(
-    id object,
-    NSUInteger depth,
-    NSMutableSet<NSValue *> *seen,
-    NSUInteger *budget
-);
-
-static void NDMCollectDetailChildren(
-    UIViewController *controller,
-    NSUInteger depth,
-    NSMutableArray<NSDictionary *> *rows,
-    NSUInteger *budget
-) {
-    if (!controller || depth > 4 || *budget == 0) return;
-    (*budget)--;
-
-    NSString *className = NDMControllerName(controller);
-    NSDictionary *fields = NDMExtractBusinessFields(controller);
-    NSMutableDictionary *row = [NSMutableDictionary dictionaryWithDictionary:@{
-        @"class": className ?: @"",
-        @"depth": @(depth),
-        @"child_count": @(
-            controller.childViewControllers.count
-        ),
-        @"note_id": fields[@"note_id"] ?: [NSNull null],
-        @"user_id": fields[@"user_id"] ?: [NSNull null]
-    }];
-    NSMutableArray<NSDictionary *> *candidateMethods = [NSMutableArray array];
-    for (Class cls = object_getClass(controller);
-         cls && cls != NSObject.class && candidateMethods.count < 80;
-         cls = class_getSuperclass(cls)) {
-        unsigned int methodCount = 0;
-        Method *methods = class_copyMethodList(cls, &methodCount);
-        for (unsigned int index = 0;
-             index < methodCount && candidateMethods.count < 80;
-             index++) {
-            SEL selector = method_getName(methods[index]);
-            NSString *name = NSStringFromSelector(selector) ?: @"";
-            NSString *lower = name.lowercaseString;
-            BOOL interesting =
-                [lower containsString:@"note"] ||
-                [lower containsString:@"detail"] ||
-                [lower containsString:@"model"] ||
-                [lower containsString:@"data"] ||
-                [lower containsString:@"content"] ||
-                [lower containsString:@"request"] ||
-                [lower containsString:@"fetch"] ||
-                [lower containsString:@"load"] ||
-                [lower containsString:@"source"] ||
-                [lower containsString:@"image"] ||
-                [lower containsString:@"video"] ||
-                [lower containsString:@"widget"] ||
-                [lower containsString:@"pick"];
-            if (!interesting) continue;
-            const char *encoding = method_getTypeEncoding(methods[index]);
-            [candidateMethods addObject:@{
-                @"selector": name,
-                @"type_encoding": encoding
-                    ? [NSString stringWithUTF8String:encoding] : @""
-            }];
-        }
-        free(methods);
-    }
-    row[@"candidate_methods"] = candidateMethods;
-
-    for (NSString *key in @[
-        @"pu_debugCurrentViewModel", @"wgt_getWidgetModel",
-        @"xyps_pickData", @"contentNoteModel", @"noteModel",
-        @"noteDetailModel", @"data", @"model"
-    ]) {
-        id value = NDMReadKnownValue(controller, key);
-        if (!value) continue;
-        row[@"model_property"] = key;
-        row[@"model_class"] = NSStringFromClass(object_getClass(value))
-            ?: @"";
-        row[@"model_fields"] = NDMExtractBusinessFields(value);
-        NSUInteger snapshotBudget = 160;
-        row[@"model_snapshot"] = NDMDeepSnapshot(
-            value, 0, [NSMutableSet set], &snapshotBudget
-        ) ?: [NSNull null];
-        break;
-    }
-    [rows addObject:row];
-
-    for (UIViewController *child in controller.childViewControllers) {
-        NDMCollectDetailChildren(child, depth + 1, rows, budget);
-        if (*budget == 0) break;
-    }
-}
-
-static void NDMReportDetailHierarchy(UIViewController *controller) {
-    if (!controller) return;
-    NSMutableArray<NSDictionary *> *rows = [NSMutableArray array];
-    NSUInteger budget = 80;
-    NDMCollectDetailChildren(controller, 0, rows, &budget);
-    NDMPostEvent(@{
-        @"event": @"detail_child_hierarchy",
-        @"controller": NDMControllerName(controller),
-        @"rows": rows,
-        @"remaining_budget": @(budget)
-    });
 }
 
 static void NDMReportController(
@@ -800,7 +540,6 @@ static void NDMShoppingRouteHook(
     fields[@"extra_class"] = extra
         ? NSStringFromClass(object_getClass(extra))
         : @"<nil>";
-    fields[@"call_stack"] = NDMCallStack();
     fields[@"event"] = @"route_invoked";
     NDMPostEvent(fields);
     if (gShoppingRouteOriginal) {
@@ -826,14 +565,6 @@ static id NDMDeepSnapshot(
         return text.length > 2048 ? [text substringToIndex:2048] : text;
     }
     if ([object isKindOfClass:NSURL.class]) return [object absoluteString];
-    NSString *className = NSStringFromClass(object_getClass(object)) ?: @"";
-    for (NSString *prefix in @[
-        @"NS", @"UI", @"CF", @"CG", @"CA", @"AV", @"PH", @"NSURL"
-    ]) {
-        if ([className hasPrefix:prefix]) {
-            return @{@"__class": className};
-        }
-    }
     if ([object isKindOfClass:NSArray.class]) {
         NSMutableArray *values = [NSMutableArray array];
         NSUInteger count = MIN((NSUInteger)[(NSArray *)object count],
@@ -848,28 +579,17 @@ static id NDMDeepSnapshot(
         }
         return values;
     }
-    BOOL dictionaryLike = [object isKindOfClass:NSDictionary.class] ||
-        ([object respondsToSelector:@selector(allKeys)] &&
-         [object respondsToSelector:@selector(objectForKey:)]);
-    if (dictionaryLike) {
+    if ([object isKindOfClass:NSDictionary.class]) {
         NSMutableDictionary *values = [NSMutableDictionary dictionary];
         NSUInteger count = 0;
-        NSArray *keys = nil;
-        @try {
-            keys = [object allKeys];
-        } @catch (__unused NSException *exception) {
-            keys = nil;
-        }
-        for (id key in keys ?: @[]) {
+        for (id key in [(NSDictionary *)object allKeys]) {
             if (count++ >= 64 || *budget == 0) break;
             NSString *name = [key description] ?: @"";
-            id child = nil;
-            @try {
-                child = [object objectForKey:key];
-            } @catch (__unused NSException *exception) {
-            }
             values[name] = NDMDeepSnapshot(
-                child, depth + 1, seen, budget
+                [(NSDictionary *)object objectForKey:key],
+                depth + 1,
+                seen,
+                budget
             ) ?: [NSNull null];
         }
         return values;
@@ -888,23 +608,6 @@ static id NDMDeepSnapshot(
             const char *rawName = property_getName(properties[index]);
             if (!rawName) continue;
             NSString *name = [NSString stringWithUTF8String:rawName];
-            NSString *lower = name.lowercaseString;
-            BOOL safe = [lower containsString:@"note"] ||
-                [lower containsString:@"user"] ||
-                [lower containsString:@"author"] ||
-                [lower containsString:@"title"] ||
-                [lower containsString:@"desc"] ||
-                [lower containsString:@"url"] ||
-                [lower containsString:@"image"] ||
-                [lower containsString:@"video"] ||
-                [lower containsString:@"media"] ||
-                [lower containsString:@"model"] ||
-                [lower containsString:@"data"] ||
-                [lower containsString:@"info"] ||
-                [lower containsString:@"count"] ||
-                [lower isEqualToString:@"id"] ||
-                [lower containsString:@"source"];
-            if (!safe) continue;
             @try {
                 id value = [object valueForKey:name];
                 if (value) values[name] = NDMDeepSnapshot(
@@ -940,7 +643,6 @@ static void NDMHomeFeedRouteHook(
     fields[@"channel_class"] = channel
         ? NSStringFromClass(object_getClass(channel))
         : @"<nil>";
-    fields[@"call_stack"] = NDMCallStack();
     fields[@"event"] = @"route_invoked";
     NDMPostEvent(fields);
     NSMutableSet<NSValue *> *seen = [NSMutableSet set];
@@ -1072,17 +774,14 @@ static id NDMObserveDetailGetter(
 ) {
     if (!original) return nil;
     id result = ((id (*)(id, SEL))original)(self, selector);
-    NSMutableDictionary *event = [NSMutableDictionary dictionaryWithDictionary:@{
+    NDMPostEvent(@{
         @"event": @"detail_viewmodel_observed",
         @"property": NSStringFromSelector(selector) ?: @"",
         @"model_class": result
             ? NSStringFromClass(object_getClass(result))
             : @"<nil>",
-        @"fields": NDMExtractBusinessFields(result),
-        @"call_stack": NDMCallStack()
-    }];
-    [event addEntriesFromDictionary:NDMTraceContext(self)];
-    NDMPostEvent(event);
+        @"fields": NDMExtractBusinessFields(result)
+    });
     return result;
 }
 
@@ -1104,24 +803,14 @@ static void NDMObserveDetailSetter(
     id value,
     IMP original
 ) {
-    NSMutableDictionary *event = [NSMutableDictionary dictionaryWithDictionary:@{
+    NDMPostEvent(@{
         @"event": @"detail_viewmodel_observed",
         @"property": NSStringFromSelector(selector) ?: @"",
         @"model_class": value
             ? NSStringFromClass(object_getClass(value))
             : @"<nil>",
-        @"fields": NDMExtractBusinessFields(value),
-        @"call_stack": NDMCallStack()
-    }];
-    [event addEntriesFromDictionary:NDMTraceContext(self)];
-    if (value) {
-        NSUInteger budget = 300;
-        event[@"snapshot"] = NDMDeepSnapshot(
-            value, 0, [NSMutableSet set], &budget
-        ) ?: [NSNull null];
-        event[@"remaining_budget"] = @(budget);
-    }
-    NDMPostEvent(event);
+        @"fields": NDMExtractBusinessFields(value)
+    });
     if (original) {
         ((void (*)(id, SEL, id))original)(self, selector, value);
     }
@@ -1135,92 +824,6 @@ static void NDMPickDataSetter(id self, SEL selector, id value) {
     NDMObserveDetailSetter(self, selector, value, gPickDataSetterOriginal);
 }
 
-static id NDMDisplayImageGetter(id self, SEL selector) {
-    return NDMObserveDetailGetter(self, selector, gDisplayImageOriginal);
-}
-
-static void NDMDisplayImageSetter(id self, SEL selector, id value) {
-    NDMObserveDetailSetter(self, selector, value, gDisplayImageSetterOriginal);
-}
-
-static id NDMCurrentImageIDGetter(id self, SEL selector) {
-    return NDMObserveDetailGetter(self, selector, gCurrentImageIDOriginal);
-}
-
-static void NDMCurrentImageIDSetter(id self, SEL selector, id value) {
-    NDMObserveDetailSetter(
-        self, selector, value, gCurrentImageIDSetterOriginal
-    );
-    id displayImage = NDMReadKnownValue(self, @"displayImage");
-    if (displayImage) {
-        NSUInteger budget = 160;
-        NSMutableDictionary *event = [NSMutableDictionary
-            dictionaryWithDictionary:@{
-                @"event": @"image_display_resolved",
-                @"property": @"setCurrentImageID:",
-                @"image_id": value ?: [NSNull null],
-                @"display_class": NSStringFromClass(
-                    object_getClass(displayImage)
-                ) ?: @"",
-                @"display_fields": NDMExtractBusinessFields(displayImage),
-                @"display_snapshot": NDMDeepSnapshot(
-                    displayImage, 0, [NSMutableSet set], &budget
-                ) ?: [NSNull null],
-                @"remaining_budget": @(budget),
-                @"call_stack": NDMCallStack()
-            }];
-        [event addEntriesFromDictionary:NDMTraceContext(self)];
-        NDMPostEvent(event);
-    }
-}
-
-static void NDMWidgetInject(id self, SEL selector, id value) {
-    NDMObserveDetailSetter(self, selector, value, gWidgetInjectOriginal);
-}
-
-static void NDMWidgetInjectDict(id self, SEL selector, id value) {
-    NDMObserveDetailSetter(
-        self, selector, value, gWidgetInjectDictOriginal
-    );
-}
-
-static void NDMImageCacheStoreSetter(id self, SEL selector, id value) {
-    NDMObserveDetailSetter(
-        self, selector, value, gImageCacheStoreSetterOriginal
-    );
-}
-
-static void NDMImageRestore(id self, SEL selector) {
-    NDMPostEvent(@{
-        @"event": @"detail_viewmodel_observed",
-        @"property": NSStringFromSelector(selector) ?: @"",
-        @"model_class": @"<void>"
-    });
-    if (gImageRestoreOriginal) {
-        ((void (*)(id, SEL))gImageRestoreOriginal)(self, selector);
-    }
-    id displayImage = NDMReadKnownValue(self, @"displayImage");
-    if (displayImage) {
-        NSUInteger budget = 400;
-        NSMutableDictionary *event = [NSMutableDictionary
-            dictionaryWithDictionary:@{
-                @"event": @"image_display_resolved",
-                @"property": NSStringFromSelector(selector) ?: @"",
-                @"display_class": NSStringFromClass(
-                    object_getClass(displayImage)
-                ) ?: @"",
-                @"display_fields": NDMExtractBusinessFields(displayImage),
-                @"display_snapshot": NDMDeepSnapshot(
-                    displayImage, 0, [NSMutableSet set], &budget
-                ) ?: [NSNull null],
-                @"remaining_budget": @(budget),
-                @"call_stack": NDMCallStack()
-            }];
-        [event addEntriesFromDictionary:NDMTraceContext(self)];
-        NDMPostEvent(event);
-    }
-}
-
 static void NDMInstallDetailViewModelHooks(void) {
     Class cls = NSClassFromString(@"XYNoteModule.NoteDetailPageInterface");
     if (!cls) return;
@@ -1230,15 +833,7 @@ static void NDMInstallDetailViewModelHooks(void) {
         @[@"wgt_getWidgetModel", @"widget"],
         @[@"xyps_pickData", @"pick"],
         @[@"wgt_setWidgetModel:", @"widget_set"],
-        @[@"setXyps_pickData:", @"pick_set"],
-        @[@"displayImage", @"display_image"],
-        @[@"setDisplayImage:", @"display_image_set"],
-        @[@"currentImageID", @"current_image_id"],
-        @[@"setCurrentImageID:", @"current_image_id_set"],
-        @[@"wgt_injectWidget:", @"widget_inject"],
-        @[@"wgt_injectWidgetWithDict:", @"widget_inject_dict"],
-        @[@"setXYImageCacheStore:", @"image_cache_store_set"],
-        @[@"xy_imageRestore", @"image_restore"]
+        @[@"setXyps_pickData:", @"pick_set"]
     ];
     for (NSArray<NSString *> *target in targets) {
         SEL selector = NSSelectorFromString(target[0]);
@@ -1252,24 +847,8 @@ static void NDMInstallDetailViewModelHooks(void) {
             continue;
         }
         const char *encoding = method_getTypeEncoding(method);
-        BOOL objectSetter =
-            [target[1] hasSuffix:@"_set"] ||
-            [target[1] isEqualToString:@"widget_inject"] ||
-            [target[1] isEqualToString:@"widget_inject_dict"];
-        if (objectSetter) {
+        if ([target[1] hasSuffix:@"_set"]) {
             if (strcmp(encoding, "v24@0:8@16") != 0) {
-                NDMPostEvent(@{
-                    @"event": @"detail_viewmodel_hook_candidate",
-                    @"property": target[0],
-                    @"status": @"unsupported",
-                    @"type_encoding": encoding
-                        ? [NSString stringWithUTF8String:encoding]
-                        : @""
-                });
-                continue;
-            }
-        } else if ([target[1] isEqualToString:@"image_restore"]) {
-            if (strcmp(encoding, "v16@0:8") != 0) {
                 NDMPostEvent(@{
                     @"event": @"detail_viewmodel_hook_candidate",
                     @"property": target[0],
@@ -1312,46 +891,6 @@ static void NDMInstallDetailViewModelHooks(void) {
                    !gPickDataSetterOriginal) {
             gPickDataSetterOriginal = method_setImplementation(
                 method, (IMP)NDMPickDataSetter
-            );
-        } else if ([target[1] isEqualToString:@"display_image"] &&
-                   !gDisplayImageOriginal) {
-            gDisplayImageOriginal = method_setImplementation(
-                method, (IMP)NDMDisplayImageGetter
-            );
-        } else if ([target[1] isEqualToString:@"display_image_set"] &&
-                   !gDisplayImageSetterOriginal) {
-            gDisplayImageSetterOriginal = method_setImplementation(
-                method, (IMP)NDMDisplayImageSetter
-            );
-        } else if ([target[1] isEqualToString:@"current_image_id"] &&
-                   !gCurrentImageIDOriginal) {
-            gCurrentImageIDOriginal = method_setImplementation(
-                method, (IMP)NDMCurrentImageIDGetter
-            );
-        } else if ([target[1] isEqualToString:@"current_image_id_set"] &&
-                   !gCurrentImageIDSetterOriginal) {
-            gCurrentImageIDSetterOriginal = method_setImplementation(
-                method, (IMP)NDMCurrentImageIDSetter
-            );
-        } else if ([target[1] isEqualToString:@"widget_inject"] &&
-                   !gWidgetInjectOriginal) {
-            gWidgetInjectOriginal = method_setImplementation(
-                method, (IMP)NDMWidgetInject
-            );
-        } else if ([target[1] isEqualToString:@"widget_inject_dict"] &&
-                   !gWidgetInjectDictOriginal) {
-            gWidgetInjectDictOriginal = method_setImplementation(
-                method, (IMP)NDMWidgetInjectDict
-            );
-        } else if ([target[1] isEqualToString:@"image_cache_store_set"] &&
-                   !gImageCacheStoreSetterOriginal) {
-            gImageCacheStoreSetterOriginal = method_setImplementation(
-                method, (IMP)NDMImageCacheStoreSetter
-            );
-        } else if ([target[1] isEqualToString:@"image_restore"] &&
-                   !gImageRestoreOriginal) {
-            gImageRestoreOriginal = method_setImplementation(
-                method, (IMP)NDMImageRestore
             );
         }
         NDMPostEvent(@{
@@ -1519,84 +1058,28 @@ static NSURL *NDMCommandURL(void) {
 static void NDMStartCommandPoll(void);
 static BOOL NDMRouteNoteModel(id model, NSString *requestID);
 
-static id NDMFindModelInResponse(
-    id response,
-    NSUInteger depth,
-    NSMutableSet<NSValue *> *seen,
-    NSString **pathOut
-) {
-    if (!response || depth > 6) return nil;
-
+static id NDMFindModelInResponse(id response) {
+    if (!response) return nil;
     NSDictionary *direct = NDMExtractBusinessFields(response);
     id directID = direct[@"note_id"];
-    if (directID && directID != [NSNull null]) {
-        if (pathOut) *pathOut = @"$";
-        return response;
-    }
+    if (directID && directID != [NSNull null]) return response;
 
-    if (![response isKindOfClass:NSString.class] &&
-        ![response isKindOfClass:NSNumber.class] &&
-        ![response isKindOfClass:NSNull.class]) {
-        NSValue *identity = [NSValue valueWithPointer:(__bridge const void *)response];
-        if ([seen containsObject:identity]) return nil;
-        [seen addObject:identity];
-    }
-
-    if ([response isKindOfClass:NSArray.class]) {
-        NSUInteger index = 0;
-        for (id child in (NSArray *)response) {
-            NSString *childPath = nil;
-            id found = NDMFindModelInResponse(
-                child, depth + 1, seen, &childPath
-            );
-            if (found) {
-                if (pathOut) {
-                    *pathOut = [NSString stringWithFormat:@"$[%lu]%@",
-                        (unsigned long)index,
-                        childPath.length > 1 ? [@"" stringByAppendingString:
-                            [childPath substringFromIndex:1]] : @""];
-                }
-                return found;
-            }
-            index++;
-        }
-        return nil;
-    }
-
-    NSArray<NSString *> *preferredKeys = @[
-        @"data", @"note", @"noteData", @"note_info", @"noteInfo",
-        @"model", @"object", @"result", @"payload", @"response", @"value"
+    NSArray<NSString *> *keys = @[
+        @"data", @"model", @"object", @"result", @"payload", @"value"
     ];
-    NSMutableArray<NSString *> *keys = [NSMutableArray array];
-    [keys addObjectsFromArray:preferredKeys];
-    for (NSString *key in NDMDictionaryKeys(response)) {
-        if (![keys containsObject:key]) [keys addObject:key];
-    }
-
     for (NSString *key in keys) {
         id nested = NDMReadKnownValue(response, key);
         if (!nested) continue;
-        NSString *childPath = nil;
-        id found = NDMFindModelInResponse(
-            nested, depth + 1, seen, &childPath
-        );
-        if (found) {
-            if (pathOut) {
-                *pathOut = [NSString stringWithFormat:@"$.%@%@",
-                    key,
-                    childPath.length > 1 ? [@"" stringByAppendingString:
-                        [childPath substringFromIndex:1]] : @""];
-            }
-            return found;
-        }
+        NSDictionary *fields = NDMExtractBusinessFields(nested);
+        id nestedID = fields[@"note_id"];
+        if (nestedID && nestedID != [NSNull null]) return nested;
     }
     return nil;
 }
 
 static BOOL NDMStartActiveNoteFetch(
     NSString *noteID,
-    NSString *requestID,
-    BOOL openUI
+    NSString *requestID
 ) {
     Class api = NSClassFromString(@"XYNoteAPI");
     SEL fetchSelector = @selector(fetchNoteDetailWithNoteId:);
@@ -1641,10 +1124,7 @@ static BOOL NDMStartActiveNoteFetch(
 
     gPendingRequestID = requestID;
     void (^completion)(id) = ^(id response) {
-        NSString *modelPath = nil;
-        id model = NDMFindModelInResponse(
-            response, 0, [NSMutableSet set], &modelPath
-        );
+        id model = NDMFindModelInResponse(response);
         NSMutableDictionary *event = [NSMutableDictionary
             dictionaryWithDictionary:NDMExtractBusinessFields(model)];
         event[@"event"] = @"note_detail_network_result";
@@ -1653,27 +1133,11 @@ static BOOL NDMStartActiveNoteFetch(
         event[@"response_class"] = response
             ? NSStringFromClass(object_getClass(response))
             : @"<nil>";
-        event[@"response_keys"] = NDMDictionaryKeys(response);
-        NSUInteger responseBudget = 600;
-        event[@"response_snapshot"] = NDMDeepSnapshot(
-            response, 0, [NSMutableSet set], &responseBudget
-        ) ?: [NSNull null];
+    event[@"response_description"] = NDMShortString(response) ?: @"";
         event[@"model_class"] = model
             ? NSStringFromClass(object_getClass(model))
             : @"<nil>";
-        event[@"model_path"] = modelPath ?: [NSNull null];
         NDMPostEvent(event);
-
-        if (!openUI) {
-            NDMPostEvent(@{
-                @"event": @"note_detail_fetch_completed",
-                @"request_id": requestID ?: @"",
-                @"note_id_requested": noteID ?: @"",
-                @"model_found": @(model != nil),
-                @"model_path": modelPath ?: [NSNull null]
-            });
-            return;
-        }
 
         if (model && NDMRouteNoteModel(model, requestID)) {
             return;
@@ -1716,57 +1180,6 @@ static BOOL NDMStartActiveNoteFetch(
     return YES;
 }
 
-static BOOL NDMOpenNoteDeepLink(
-    NSString *noteID,
-    NSString *requestID,
-    NSString *type
-) {
-    if (noteID.length == 0) return NO;
-
-    // The app's documented internal route is xhsdiscover://item/<id>.
-    // Keep the command narrow: only a note id and the normal/video type are
-    // accepted, rather than forwarding arbitrary URLs from the collector.
-    NSCharacterSet *allowed = [
-        NSCharacterSet characterSetWithCharactersInString:
-            @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
-    ];
-    if ([noteID rangeOfCharacterFromSet:allowed.invertedSet].location != NSNotFound) {
-        NDMPostEvent(@{
-            @"event": @"deep_link_rejected",
-            @"request_id": requestID ?: @"",
-            @"note_id": noteID,
-            @"reason": @"note_id contains unsupported characters"
-        });
-        return NO;
-    }
-
-    NSString *routeType = [type isEqualToString:@"video"] ? @"video" : @"normal";
-    NSString *route = [NSString stringWithFormat:
-        @"xhsdiscover://item/%@?type=%@", noteID, routeType];
-    NSURL *URL = [NSURL URLWithString:route];
-    if (!URL) return NO;
-
-    NDMPostEvent(@{
-        @"event": @"deep_link_requested",
-        @"request_id": requestID ?: @"",
-        @"note_id": noteID,
-        @"route": [NSString stringWithFormat:
-            @"xhsdiscover://item/<note_id>?type=%@", routeType]
-    });
-
-    UIApplication *application = UIApplication.sharedApplication;
-    if (!application) return NO;
-
-    [application openURL:URL options:@{} completionHandler:^(BOOL success) {
-        NDMPostEvent(@{
-            @"event": success ? @"deep_link_accepted" : @"deep_link_failed",
-            @"request_id": requestID ?: @"",
-            @"note_id": noteID
-        });
-    }];
-    return YES;
-}
-
 static BOOL NDMRouteNoteModel(id model, NSString *requestID) {
     if (!model) return NO;
     Class router = NSClassFromString(@"XYShopping.SRouter");
@@ -1793,51 +1206,100 @@ static BOOL NDMRouteNoteModel(id model, NSString *requestID) {
     return YES;
 }
 
+static void NDMPopNavigation(void) {
+    UIWindow *keyWindow = nil;
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (scene.activationState != UISceneActivationStateForegroundActive ||
+                ![scene isKindOfClass:UIWindowScene.class]) {
+                continue;
+            }
+            for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+                if (window.isKeyWindow) {
+                    keyWindow = window;
+                    break;
+                }
+            }
+            if (keyWindow) break;
+        }
+    }
+    if (!keyWindow) {
+        keyWindow = UIApplication.sharedApplication.keyWindow;
+    }
+    if (!keyWindow) {
+        NDMPostEvent(@{
+            @"event": @"go_back_failed",
+            @"reason": @"no_key_window"
+        });
+        return;
+    }
+
+    UIViewController *topController = keyWindow.rootViewController;
+    while (topController.presentedViewController) {
+        topController = topController.presentedViewController;
+    }
+
+    UINavigationController *nav = nil;
+    if ([topController isKindOfClass:UINavigationController.class]) {
+        nav = (UINavigationController *)topController;
+    } else {
+        nav = topController.navigationController;
+    }
+
+    if (!nav) {
+        NDMPostEvent(@{
+            @"event": @"go_back_failed",
+            @"reason": @"no_navigation_controller"
+        });
+        return;
+    }
+
+    NSUInteger count = nav.viewControllers.count;
+    NSString *currentController = NSStringFromClass(topController.class) ?: @"";
+    BOOL popped = NO;
+    if (count > 1) {
+        [nav popViewControllerAnimated:YES];
+        popped = YES;
+    } else if (nav.presentingViewController) {
+        [nav dismissViewControllerAnimated:YES completion:nil];
+        popped = YES;
+    } else if (topController.presentingViewController) {
+        [topController dismissViewControllerAnimated:YES completion:nil];
+        popped = YES;
+    }
+
+    NDMPostEvent(@{
+        @"event": popped ? @"go_back_executed" : @"go_back_failed",
+        @"stack_depth": @(count),
+        @"current_controller": currentController,
+        @"reason": popped ? @"" : @"nothing_to_pop"
+    });
+}
+
 static void NDMExecuteCommand(NSDictionary *command) {
     NSString *name = command[@"command"];
     NSString *requestID = command[@"request_id"];
     NSString *noteID = command[@"note_id"];
     NSString *strategy = command[@"strategy"] ?: @"auto";
-    if (![name isEqualToString:@"open_note"] &&
-        ![name isEqualToString:@"fetch_note"]) {
-        return;
-    }
-    if (noteID.length == 0) {
+
+    if ([name isEqualToString:@"go_back"]) {
+        NDMPostEvent(@{
+            @"event": @"go_back_requested",
+            @"request_id": requestID ?: @""
+        });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NDMPopNavigation();
+        });
         return;
     }
 
-    BOOL fetchOnly = [name isEqualToString:@"fetch_note"] ||
-        [strategy isEqualToString:@"fetch_only"];
-    if (requestID.length > 0) {
-        gPendingRequestID = requestID;
-        gPendingNoteID = noteID;
-    }
-    if (!fetchOnly &&
-        ([strategy isEqualToString:@"deep_link"] ||
-         [strategy isEqualToString:@"url_scheme"] ||
-         [strategy isEqualToString:@"auto"])) {
-        NSString *type = command[@"type"] ?: @"normal";
-        if (NDMOpenNoteDeepLink(noteID, requestID, type)) return;
-        if ([strategy isEqualToString:@"deep_link"] ||
-            [strategy isEqualToString:@"url_scheme"]) {
-            NDMPostEvent(@{
-                @"event": @"open_note_failed",
-                @"request_id": requestID ?: @"",
-                @"note_id": noteID,
-                @"reason": @"deep link unavailable"
-            });
-            return;
-        }
+    if (![name isEqualToString:@"open_note"] || noteID.length == 0) {
+        return;
     }
 
-    if (!fetchOnly && ([strategy isEqualToString:@"auto"] ||
-        [strategy isEqualToString:@"xy_note_api"])) {
-        if (NDMStartActiveNoteFetch(noteID, requestID, YES)) return;
-    } else if (fetchOnly &&
-        ([strategy isEqualToString:@"auto"] ||
-         [strategy isEqualToString:@"fetch_only"] ||
-         [strategy isEqualToString:@"xy_note_api"])) {
-        if (NDMStartActiveNoteFetch(noteID, requestID, NO)) return;
+    if ([strategy isEqualToString:@"auto"] ||
+        [strategy isEqualToString:@"xy_note_api"]) {
+        if (NDMStartActiveNoteFetch(noteID, requestID)) return;
     }
 
     SEL selector = gRouteSelector ?: @selector(openNoteDetailWithNoteID:);
@@ -1895,7 +1357,6 @@ static void NDMExecuteCommand(NSDictionary *command) {
 static void NDMPollCommands(void) {
     NDMInstallRouteHook();
     NDMInstallDetailViewModelHooks();
-    NDMInstallImageBrowserHooks();
     NSURL *URL = NDMCommandURL();
     if (!URL) {
         NDMStartCommandPoll();
@@ -1947,101 +1408,6 @@ static void NDMStartCommandPoll(void) {
     );
 }
 
-static void NDMImageBrowserRecordLoad(
-    id self,
-    SEL selector,
-    long long index,
-    id url
-) {
-    id browser = NDMReadKnownValue(self, @"imageBrowser");
-    NDMReportImageBrowserMedia(browser, nil, index, url);
-    if (gImageBrowserRecordLoadOriginal) {
-        ((void (*)(id, SEL, long long, id))gImageBrowserRecordLoadOriginal)(
-            self, selector, index, url
-        );
-    }
-}
-
-static void NDMImageBrowserWillDisplay(
-    id self,
-    SEL selector,
-    id collectionView,
-    id cell,
-    id indexPath
-) {
-    long long index = 0;
-    NSIndexPath *typedIndexPath = (NSIndexPath *)indexPath;
-    if ([typedIndexPath respondsToSelector:@selector(item)]) {
-        index = typedIndexPath.item;
-    }
-    NDMReportImageBrowserMedia(self, cell, index, nil);
-    if (gImageBrowserWillDisplayOriginal) {
-        ((void (*)(id, SEL, id, id, id))gImageBrowserWillDisplayOriginal)(
-            self, selector, collectionView, cell, indexPath
-        );
-    }
-}
-
-static void NDMInstallImageBrowserHooks(void) {
-    Class viewModel = NSClassFromString(
-        @"_TtC11XYNoteBasic7IBViewModel"
-    );
-    SEL recordSelector = NSSelectorFromString(
-        @"recordImageLoadFirstStartWithIndex:url:"
-    );
-    Method recordMethod = viewModel
-        ? class_getInstanceMethod(viewModel, recordSelector) : NULL;
-    if (recordMethod && !gImageBrowserRecordLoadOriginal &&
-        strcmp(method_getTypeEncoding(recordMethod), "v32@0:8q16@24") == 0) {
-        if (!NDMDirectMethod(viewModel, recordSelector)) {
-            class_addMethod(
-                viewModel,
-                recordSelector,
-                method_getImplementation(recordMethod),
-                method_getTypeEncoding(recordMethod)
-            );
-            recordMethod = NDMDirectMethod(viewModel, recordSelector);
-        }
-        gImageBrowserRecordLoadOriginal = method_setImplementation(
-            recordMethod, (IMP)NDMImageBrowserRecordLoad
-        );
-        NDMPostEvent(@{
-            @"event": @"image_browser_hook_installed",
-            @"class": NSStringFromClass(viewModel),
-            @"selector": NSStringFromSelector(recordSelector)
-        });
-    }
-
-    Class browser = NSClassFromString(
-        @"_TtC11XYNoteBasic12ImageBrowser"
-    );
-    SEL displaySelector = @selector(
-        collectionView:willDisplayCell:forItemAtIndexPath:
-    );
-    Method displayMethod = browser
-        ? class_getInstanceMethod(browser, displaySelector) : NULL;
-    if (displayMethod && !gImageBrowserWillDisplayOriginal &&
-        strcmp(method_getTypeEncoding(displayMethod), "v40@0:8@16@24@32") == 0) {
-        if (!NDMDirectMethod(browser, displaySelector)) {
-            class_addMethod(
-                browser,
-                displaySelector,
-                method_getImplementation(displayMethod),
-                method_getTypeEncoding(displayMethod)
-            );
-            displayMethod = NDMDirectMethod(browser, displaySelector);
-        }
-        gImageBrowserWillDisplayOriginal = method_setImplementation(
-            displayMethod, (IMP)NDMImageBrowserWillDisplay
-        );
-        NDMPostEvent(@{
-            @"event": @"image_browser_hook_installed",
-            @"class": NSStringFromClass(browser),
-            @"selector": NSStringFromSelector(displaySelector)
-        });
-    }
-}
-
 %group NoteDetailNavigation
 
 %hook UINavigationController
@@ -2065,19 +1431,8 @@ static void NDMInstallImageBrowserHooks(void) {
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    if (NDMLooksLikeAuthController(self) &&
-        gPendingRequestID.length > 0) {
-        NDMPostEvent(@{
-            @"event": @"deep_link_blocked_auth",
-            @"request_id": gPendingRequestID ?: @"",
-            @"note_id": gPendingNoteID ?: @"",
-            @"controller": NDMControllerName(self),
-            @"call_stack": NDMCallStack()
-        });
-    }
     if (NDMLooksLikeDetailController(self)) {
         NDMReportController(self, @"appear", nil);
-        NDMReportDetailHierarchy(self);
     }
 }
 
