@@ -1055,6 +1055,7 @@ static NSURL *NDMCommandURL(void) {
     return components.URL;
 }
 
+static void NDMOpenNoteViaURL(NSString *noteID, NSString *requestID);
 static void NDMStartCommandPoll(void);
 static BOOL NDMRouteNoteModel(id model, NSString *requestID);
 
@@ -1231,6 +1232,8 @@ static void NDMPopNavigation(void) {
             @"event": @"go_back_failed",
             @"reason": @"no_key_window"
         });
+        
+        NDMOpenNoteViaURL(noteID, requestID);
         return;
     }
 
@@ -1330,6 +1333,8 @@ static void NDMExecuteCommand(NSDictionary *command) {
             @"note_id": noteID,
             @"reason": @"route_instance_not_observed"
         });
+        
+        NDMOpenNoteViaURL(noteID, requestID);
         return;
     }
 
@@ -1352,6 +1357,14 @@ static void NDMExecuteCommand(NSDictionary *command) {
             ((void (*)(id, SEL, id))objc_msgSend)(route, selector, noteID);
         }
     });
+}
+
+
+static void NDMOpenNoteViaURL(NSString *noteID, NSString *requestID) {
+    NSString *us = [NSString stringWithFormat:@"xhsdiscover://item/%@", noteID];
+    NSURL *u = [NSURL URLWithString:us];
+    NDMPostEvent(@{@"event":@"open_note_url_fallback",@"request_id":requestID?:@"",@"note_id":noteID,@"url":us});
+    if (u) [[UIApplication sharedApplication] openURL:u options:@{} completionHandler:nil];
 }
 
 static void NDMPollCommands(void) {
