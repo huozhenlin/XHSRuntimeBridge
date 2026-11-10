@@ -1,9 +1,0 @@
-Package: com.huozhenlin.flexinjector
-Name: FLEX Injector
-Version: 5.22.10-1
-Architecture: iphoneos-arm
-Description: Official FLEX runtime explorer packaged as an injectable dylib.
-Maintainer: huozhenlin
-Author: FLEX Team
-Section: Development
-Depends: firmware (>= 15.0)
