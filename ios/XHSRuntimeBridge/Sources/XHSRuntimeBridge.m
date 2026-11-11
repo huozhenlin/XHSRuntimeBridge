@@ -1178,7 +1178,7 @@ static NSDictionary *XRBDelegateMetadata(id delegate) {
         : @"";
     return @{
         @"delegate_class": className,
-        @"is_worldsnake_session_delegator":
+        @"worldsnake_delegator":
             @(XRBIsWorldSnakeSessionDelegator(delegate))
     };
 }
@@ -1427,10 +1427,38 @@ static void XRBInstallURLSessionDelegateObservation(void) {
     for (int index = 0; index < count; index++) {
         Class cls = classes[index];
         if (!XRBIsAppDelegateClass(cls)) continue;
+        NSString *className = NSStringFromClass(cls) ?: @"";
+        BOOL isWorldSnake =
+            [className containsString:@"WorldSnakeSessionDelegator"];
         for (NSString *selectorName in delegateSelectorNames) {
             SEL selector = NSSelectorFromString(selectorName);
             Method method = XRBDirectMethod(cls, selector);
-            if (!method) continue;
+            if (!method) {
+                // Delegate callbacks may be inherited from a Swift/Objective-C
+                // base class. Add a class-local forwarding method before
+                // replacing it, so this delegate instance is observed without
+                // mutating every class that shares the inherited method.
+                Method inherited = class_getInstanceMethod(cls, selector);
+                if (inherited &&
+                    class_addMethod(
+                        cls,
+                        selector,
+                        method_getImplementation(inherited),
+                        method_getTypeEncoding(inherited)
+                    )) {
+                    method = XRBDirectMethod(cls, selector);
+                }
+            }
+            if (!method) {
+                if (isWorldSnake) {
+                    XRBLogEvent(@"worldsnake_delegate_hook_skipped", @{
+                        @"class": className,
+                        @"selector": selectorName,
+                        @"reason": @"method_not_found"
+                    });
+                }
+                continue;
+            }
 
             pthread_mutex_lock(&gBusinessHooksLock);
             BOOL alreadyInstalled = NO;
@@ -1466,6 +1494,16 @@ static void XRBInstallURLSessionDelegateObservation(void) {
                        strcmp(encoding, "v32@0:8@16@24") == 0) {
                 replacement = (IMP)XRBHookURLSessionDownloadComplete;
             } else {
+                if (isWorldSnake) {
+                    XRBLogEvent(@"worldsnake_delegate_hook_skipped", @{
+                        @"class": className,
+                        @"selector": selectorName,
+                        @"reason": @"unsupported_type_encoding",
+                        @"type_encoding": encoding
+                            ? [NSString stringWithUTF8String:encoding]
+                            : @""
+                    });
+                }
                 continue;
             }
 
@@ -1476,10 +1514,9 @@ static void XRBInstallURLSessionDelegateObservation(void) {
                 @"selector": NSStringFromSelector(selector) ?: @"",
                 @"type_encoding": [NSString stringWithUTF8String:encoding]
             });
-            if ([NSStringFromClass(cls)
-                 containsString:@"WorldSnakeSessionDelegator"]) {
+            if (isWorldSnake) {
                 XRBLogEvent(@"worldsnake_delegate_hook_installed", @{
-                    @"class": NSStringFromClass(cls) ?: @"",
+                    @"class": className,
                     @"selector": NSStringFromSelector(selector) ?: @"",
                     @"type_encoding":
                         [NSString stringWithUTF8String:encoding]
