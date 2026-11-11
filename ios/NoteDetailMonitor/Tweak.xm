@@ -1149,6 +1149,9 @@ static BOOL NDMStartActiveNoteFetch(
             @"note_id": noteID ?: @"",
             @"reason": @"detail model not found in WSR response"
         });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NDMOpenNoteViaURL(noteID, requestID);
+        });
     };
 
     @try {
@@ -1232,8 +1235,6 @@ static void NDMPopNavigation(void) {
             @"event": @"go_back_failed",
             @"reason": @"no_key_window"
         });
-        
-        NDMOpenNoteViaURL(noteID, requestID);
         return;
     }
 
