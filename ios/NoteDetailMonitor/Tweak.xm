@@ -26,6 +26,11 @@ static IMP gWidgetModelOriginal;
 static IMP gPickDataOriginal;
 static IMP gWidgetModelSetterOriginal;
 static IMP gPickDataSetterOriginal;
+// A URL-scheme open may land on a video-player controller whose runtime class
+// does not contain "NoteDetail".  Arm exactly one safe return for that remote
+// open; the flag is cleared before acting so a repeated go_back cannot unwind
+// the app's root navigation stack.
+static BOOL gRemoteDetailBackArmed;
 static void NDMInstallDetailViewModelHooks(void);
 
 static os_log_t NDMLog(void) {
@@ -1260,10 +1265,16 @@ static void NDMPopNavigation(void) {
     NSUInteger count = nav.viewControllers.count;
     NSString *currentController = NSStringFromClass(visible.class) ?: @"";
 
-    // A remote "back" command must never dismiss the app's root navigation
-    // stack. Only close a controller that is positively identified as a note
-    // detail page; every other state is a safe no-op.
-    if (!NDMLooksLikeDetailController(visible)) {
+    BOOL isKnownDetail = NDMLooksLikeDetailController(visible);
+    BOOL isArmedRemoteDetail = gRemoteDetailBackArmed;
+    // Consume the one-shot permission before doing any navigation. A second
+    // command cannot then pop/dismiss an unrelated root controller.
+    gRemoteDetailBackArmed = NO;
+
+    // Video deep links can present a player controller rather than a class
+    // named "NoteDetail". Permit one return immediately after a remote open,
+    // but leave every other unknown screen untouched.
+    if (!isKnownDetail && !isArmedRemoteDetail) {
         NDMPostEvent(@{
             @"event": @"go_back_failed",
             @"stack_depth": @(count),
@@ -1328,6 +1339,7 @@ static void NDMExecuteCommand(NSDictionary *command) {
     // This strategy intentionally bypasses app-private routing and network
     // APIs. It matches the working browser deep-link behavior directly.
     if ([strategy isEqualToString:@"url_scheme"]) {
+        gRemoteDetailBackArmed = YES;
         NDMPostEvent(@{
             @"event": @"open_note_url_scheme_requested",
             @"request_id": requestID ?: @"",
