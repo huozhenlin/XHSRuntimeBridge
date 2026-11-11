@@ -77,7 +77,7 @@ def load_note_records(
                   AND TRIM(note_id) <> ''
                   AND (
                       ? = ''
-                      OR INSTR(COALESCE(title, ''), ?) > 0
+                      OR INSTR(COALESCE(source_keyword, ''), ?) > 0
                   )
                 GROUP BY note_id
             ) AS latest
@@ -154,7 +154,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--keyword",
         default="",
-        help="Literal substring matched against note titles only.",
+        help="Literal substring matched against xhs_note.source_keyword only.",
     )
     parser.add_argument(
         "--minimum-detail-dwell",
