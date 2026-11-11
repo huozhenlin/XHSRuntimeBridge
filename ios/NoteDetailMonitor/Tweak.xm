@@ -1055,7 +1055,11 @@ static NSURL *NDMCommandURL(void) {
     return components.URL;
 }
 
-static void NDMOpenNoteViaURL(NSString *noteID, NSString *requestID);
+static void NDMOpenNoteViaURL(
+    NSString *noteID,
+    NSString *requestID,
+    NSString *noteType
+);
 static void NDMStartCommandPoll(void);
 static BOOL NDMRouteNoteModel(id model, NSString *requestID);
 
@@ -1080,7 +1084,8 @@ static id NDMFindModelInResponse(id response) {
 
 static BOOL NDMStartActiveNoteFetch(
     NSString *noteID,
-    NSString *requestID
+    NSString *requestID,
+    NSString *noteType
 ) {
     Class api = NSClassFromString(@"XYNoteAPI");
     SEL fetchSelector = @selector(fetchNoteDetailWithNoteId:);
@@ -1150,7 +1155,7 @@ static BOOL NDMStartActiveNoteFetch(
             @"reason": @"detail model not found in WSR response"
         });
         dispatch_async(dispatch_get_main_queue(), ^{
-            NDMOpenNoteViaURL(noteID, requestID);
+            NDMOpenNoteViaURL(noteID, requestID, noteType);
         });
     };
 
@@ -1284,6 +1289,7 @@ static void NDMExecuteCommand(NSDictionary *command) {
     NSString *name = command[@"command"];
     NSString *requestID = command[@"request_id"];
     NSString *noteID = command[@"note_id"];
+    NSString *noteType = command[@"note_type"];
     NSString *strategy = command[@"strategy"] ?: @"auto";
 
     if ([name isEqualToString:@"go_back"]) {
@@ -1310,14 +1316,14 @@ static void NDMExecuteCommand(NSDictionary *command) {
             @"note_id": noteID
         });
         dispatch_async(dispatch_get_main_queue(), ^{
-            NDMOpenNoteViaURL(noteID, requestID);
+            NDMOpenNoteViaURL(noteID, requestID, noteType);
         });
         return;
     }
 
     if ([strategy isEqualToString:@"auto"] ||
         [strategy isEqualToString:@"xy_note_api"]) {
-        if (NDMStartActiveNoteFetch(noteID, requestID)) return;
+        if (NDMStartActiveNoteFetch(noteID, requestID, noteType)) return;
     }
 
     SEL selector = gRouteSelector ?: @selector(openNoteDetailWithNoteID:);
@@ -1349,7 +1355,7 @@ static void NDMExecuteCommand(NSDictionary *command) {
             @"reason": @"route_instance_not_observed"
         });
         
-        NDMOpenNoteViaURL(noteID, requestID);
+        NDMOpenNoteViaURL(noteID, requestID, noteType);
         return;
     }
 
@@ -1375,10 +1381,25 @@ static void NDMExecuteCommand(NSDictionary *command) {
 }
 
 
-static void NDMOpenNoteViaURL(NSString *noteID, NSString *requestID) {
-    NSString *us = [NSString stringWithFormat:@"xhsdiscover://item/%@", noteID];
+static void NDMOpenNoteViaURL(
+    NSString *noteID,
+    NSString *requestID,
+    NSString *noteType
+) {
+    BOOL isVideo = [[noteType lowercaseString] isEqualToString:@"video"];
+    NSString *us = [NSString stringWithFormat:
+        @"xhsdiscover://item/%@%@",
+        noteID,
+        isVideo ? @"?type=video" : @""
+    ];
     NSURL *u = [NSURL URLWithString:us];
-    NDMPostEvent(@{@"event":@"open_note_url_fallback",@"request_id":requestID?:@"",@"note_id":noteID,@"url":us});
+    NDMPostEvent(@{
+        @"event": @"open_note_url_fallback",
+        @"request_id": requestID ?: @"",
+        @"note_id": noteID,
+        @"note_type": noteType ?: @"",
+        @"url": us
+    });
     if (u) [[UIApplication sharedApplication] openURL:u options:@{} completionHandler:nil];
 }
 
