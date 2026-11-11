@@ -209,6 +209,40 @@ static NSDictionary *XRBResponseSummary(
     return summary;
 }
 
+static NSDictionary *XRBRequestSummary(NSURLRequest *request) {
+    NSURL *URL = request.URL;
+    NSMutableDictionary *summary = [NSMutableDictionary dictionaryWithDictionary:@{
+        @"method": request.HTTPMethod ?: @"",
+        @"url_scheme": URL.scheme ?: @"",
+        @"url_host": URL.host ?: @"",
+        @"url_path": URL.path ?: @"",
+        @"query_names": XRBQueryNames(URL),
+        @"request_body_length": @(request.HTTPBody.length)
+    }];
+
+    NSData *body = request.HTTPBody;
+    if (body.length == 0) return summary;
+
+    id JSON = [NSJSONSerialization JSONObjectWithData:body options:0 error:nil];
+    if ([JSON isKindOfClass:NSDictionary.class]) {
+        NSArray *keys = [[(NSDictionary *)JSON allKeys]
+            sortedArrayUsingComparator:^NSComparisonResult(id left, id right) {
+                return [[left description] compare:[right description]];
+            }];
+        summary[@"request_json_type"] = @"dictionary";
+        summary[@"request_top_level_keys"] = keys;
+        NSUInteger budget = 128;
+        summary[@"request_json_snapshot"] = XRBTrimJSON(JSON, 0, &budget);
+        summary[@"request_json_remaining_budget"] = @(budget);
+    } else if ([JSON isKindOfClass:NSArray.class]) {
+        summary[@"request_json_type"] = @"array";
+        summary[@"request_array_count"] = @([(NSArray *)JSON count]);
+    } else {
+        summary[@"request_json_type"] = @"non_json";
+    }
+    return summary;
+}
+
 static BOOL XRBIsLikelyNoteRequest(NSURL *URL) {
     if (!URL) return NO;
     NSString *path = URL.path.lowercaseString ?: @"";
@@ -1130,6 +1164,25 @@ static BOOL XRBIsAppDelegateClass(Class cls) {
     return YES;
 }
 
+static BOOL XRBIsWorldSnakeSessionDelegator(id object) {
+    NSString *name = object
+        ? (NSStringFromClass(object_getClass(object)) ?: @"")
+        : @"";
+    return [name isEqualToString:@"XYWorldSnake.WorldSnakeSessionDelegator"] ||
+        [name containsString:@"WorldSnakeSessionDelegator"];
+}
+
+static NSDictionary *XRBDelegateMetadata(id delegate) {
+    NSString *className = delegate
+        ? (NSStringFromClass(object_getClass(delegate)) ?: @"")
+        : @"";
+    return @{
+        @"delegate_class": className,
+        @"is_worldsnake_session_delegator":
+            @(XRBIsWorldSnakeSessionDelegator(delegate))
+    };
+}
+
 static NSURL *XRBTaskURL(id task) {
     if (!task) return nil;
     @try {
@@ -1206,8 +1259,16 @@ static void XRBHookURLSessionDidComplete(
         summary[@"url_scheme"] = URL.scheme ?: @"";
         summary[@"url_host"] = URL.host ?: @"";
         summary[@"url_path"] = URL.path ?: @"";
-        summary[@"transport"] = @"urlsession_delegate";
-        XRBLogEvent(@"note_detail_response", summary);
+        [summary addEntriesFromDictionary:XRBDelegateMetadata(self)];
+        summary[@"transport"] = XRBIsWorldSnakeSessionDelegator(self)
+            ? @"worldsnake_urlsession_delegate"
+            : @"urlsession_delegate";
+        XRBLogEvent(
+            XRBIsWorldSnakeSessionDelegator(self)
+                ? @"worldsnake_note_response"
+                : @"note_detail_response",
+            summary
+        );
     }
 
     IMP original = XRBOriginalImplementation(self, selector);
@@ -1228,15 +1289,24 @@ static void XRBHookURLSessionDidReceiveResponse(
 ) {
     NSURL *URL = XRBTaskURL(task);
     if (URL && XRBIsLikelyNoteRequest(URL)) {
-        XRBLogEvent(@"note_detail_response_headers", @{
+        NSMutableDictionary *fields = [NSMutableDictionary dictionaryWithDictionary:@{
             @"url_scheme": URL.scheme ?: @"",
             @"url_host": URL.host ?: @"",
             @"url_path": URL.path ?: @"",
             @"status_code": [response isKindOfClass:NSHTTPURLResponse.class]
                 ? @([(NSHTTPURLResponse *)response statusCode])
                 : @0,
-            @"transport": @"urlsession_delegate"
-        });
+            @"transport": XRBIsWorldSnakeSessionDelegator(self)
+                ? @"worldsnake_urlsession_delegate"
+                : @"urlsession_delegate"
+        }];
+        [fields addEntriesFromDictionary:XRBDelegateMetadata(self)];
+        XRBLogEvent(
+            XRBIsWorldSnakeSessionDelegator(self)
+                ? @"worldsnake_note_response_headers"
+                : @"note_detail_response_headers",
+            fields
+        );
     }
     IMP original = XRBOriginalImplementation(self, selector);
     if (original) {
@@ -1406,6 +1476,15 @@ static void XRBInstallURLSessionDelegateObservation(void) {
                 @"selector": NSStringFromSelector(selector) ?: @"",
                 @"type_encoding": [NSString stringWithUTF8String:encoding]
             });
+            if ([NSStringFromClass(cls)
+                 containsString:@"WorldSnakeSessionDelegator"]) {
+                XRBLogEvent(@"worldsnake_delegate_hook_installed", @{
+                    @"class": NSStringFromClass(cls) ?: @"",
+                    @"selector": NSStringFromSelector(selector) ?: @"",
+                    @"type_encoding":
+                        [NSString stringWithUTF8String:encoding]
+                });
+            }
         }
     }
     free(classes);
@@ -1667,6 +1746,8 @@ static void XRBRescanBusinessHooks(void) {
 
 @interface NSURLSession (XHSRuntimeBridge)
 
+- (NSURLSessionDataTask *)xrb_dataTaskWithRequest:(NSURLRequest *)request;
+
 - (NSURLSessionDataTask *)xrb_dataTaskWithRequest:(NSURLRequest *)request
     completionHandler:(void (^)(NSData * _Nullable data,
                                 NSURLResponse * _Nullable response,
@@ -1675,6 +1756,26 @@ static void XRBRescanBusinessHooks(void) {
 @end
 
 @implementation NSURLSession (XHSRuntimeBridge)
+
+- (NSURLSessionDataTask *)xrb_dataTaskWithRequest:(NSURLRequest *)request {
+    NSURLSessionDataTask *task = [self xrb_dataTaskWithRequest:request];
+    if (!XRBIsCollectorRequest(request) &&
+        XRBIsLikelyNoteRequest(request.URL)) {
+        NSMutableDictionary *summary = [NSMutableDictionary
+            dictionaryWithDictionary:XRBRequestSummary(request)];
+        id delegate = self.delegate;
+        [summary addEntriesFromDictionary:XRBDelegateMetadata(delegate)];
+        summary[@"transport"] = @"urlsession_delegate_task";
+        summary[@"task_identifier"] = @(task.taskIdentifier);
+        XRBLogEvent(
+            XRBIsWorldSnakeSessionDelegator(delegate)
+                ? @"worldsnake_note_request_preflight"
+                : @"note_detail_request_preflight",
+            summary
+        );
+    }
+    return task;
+}
 
 - (NSURLSessionDataTask *)xrb_dataTaskWithRequest:(NSURLRequest *)request
     completionHandler:(void (^)(NSData *data,
@@ -1692,14 +1793,17 @@ static void XRBRescanBusinessHooks(void) {
                           completionHandler:completionHandler];
     }
 
-    XRBLogEvent(@"note_detail_request", @{
-        @"method": request.HTTPMethod ?: @"",
-        @"url_scheme": URL.scheme ?: @"",
-        @"url_host": URL.host ?: @"",
-        @"url_path": URL.path ?: @"",
-        @"query_names": XRBQueryNames(URL),
-        @"request_body_length": @(request.HTTPBody.length)
-    });
+    NSMutableDictionary *requestSummary = [NSMutableDictionary
+        dictionaryWithDictionary:XRBRequestSummary(request)];
+    id delegate = self.delegate;
+    [requestSummary addEntriesFromDictionary:XRBDelegateMetadata(delegate)];
+    requestSummary[@"transport"] = @"urlsession_completion_task";
+    XRBLogEvent(
+        XRBIsWorldSnakeSessionDelegator(delegate)
+            ? @"worldsnake_note_request"
+            : @"note_detail_request",
+        requestSummary
+    );
 
     void (^wrappedCompletion)(NSData *, NSURLResponse *, NSError *) =
         ^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -1720,15 +1824,21 @@ static void XRBRescanBusinessHooks(void) {
 
 static void XRBInstallURLSessionObservation(void) {
     Class sessionClass = NSURLSession.class;
+    SEL originalTaskSelector = @selector(dataTaskWithRequest:);
+    SEL replacementTaskSelector = @selector(xrb_dataTaskWithRequest:);
     SEL originalSelector =
         @selector(dataTaskWithRequest:completionHandler:);
     SEL replacementSelector =
         @selector(xrb_dataTaskWithRequest:completionHandler:);
 
+    Method originalTask =
+        class_getInstanceMethod(sessionClass, originalTaskSelector);
+    Method replacementTask =
+        class_getInstanceMethod(sessionClass, replacementTaskSelector);
     Method original = class_getInstanceMethod(sessionClass, originalSelector);
     Method replacement =
         class_getInstanceMethod(sessionClass, replacementSelector);
-    if (!original || !replacement) {
+    if (!originalTask || !replacementTask || !original || !replacement) {
         XRBLogEvent(@"logger_error", @{
             @"stage": @"install_urlsession_hook",
             @"reason": @"method_not_found"
@@ -1736,10 +1846,14 @@ static void XRBInstallURLSessionObservation(void) {
         return;
     }
 
+    method_exchangeImplementations(originalTask, replacementTask);
     method_exchangeImplementations(original, replacement);
     XRBLogEvent(@"hook_installed", @{
         @"class": NSStringFromClass(sessionClass),
-        @"selector": NSStringFromSelector(originalSelector)
+        @"selectors": @[
+            NSStringFromSelector(originalTaskSelector),
+            NSStringFromSelector(originalSelector)
+        ]
     });
 }
 

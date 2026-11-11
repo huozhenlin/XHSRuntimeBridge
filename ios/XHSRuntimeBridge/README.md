@@ -6,10 +6,14 @@
 - 枚举笔记详情相关 Selector 的实际所属类和类型编码；
 - 观察经过 `NSURLSession` 的 `/api/sns/v10/note` 请求；
 - 包装 completion，记录状态码、响应长度和 JSON 顶层结构；
+- 对 `XYWorldSnake.WorldSnakeSessionDelegator` 的 URLSession delegate
+  回调增加标记：记录请求创建前的已脱敏 JSON 结构、响应状态、响应 JSON
+  顶层结构和受限快照；
 - 所有事件同时备份到 App 的
   `Documents/XHSRuntimeBridge/events.ndjson`。
 
-它不会记录请求头、Cookie、SID、签名值或完整 `xsec_token`。
+它不会记录请求头、Cookie、SID、签名值或完整 `xsec_token`；请求和响应
+JSON 中的凭据类键也会在写入前被脱敏。
 
 ## TrollStore 注入
 
