@@ -55,7 +55,12 @@ def request_json(
     return parsed
 
 
-def load_note_records(database: Path, limit: int) -> list[tuple[str, str, str]]:
+def load_note_records(
+    database: Path,
+    limit: int,
+    keyword: str = "",
+) -> list[tuple[str, str, str]]:
+    keyword = keyword.strip()
     connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
     try:
         rows = connection.execute(
@@ -70,13 +75,19 @@ def load_note_records(database: Path, limit: int) -> list[tuple[str, str, str]]:
                 FROM xhs_note
                 WHERE note_id IS NOT NULL
                   AND TRIM(note_id) <> ''
+                  AND (
+                      ? = ''
+                      OR INSTR(COALESCE(title, ''), ?) > 0
+                      OR INSTR(COALESCE(desc, ''), ?) > 0
+                      OR INSTR(COALESCE(source_keyword, ''), ?) > 0
+                  )
                 GROUP BY note_id
             ) AS latest
                 ON latest.latest_id = note.id
             ORDER BY note.id DESC
             LIMIT ?
             """,
-            (limit,),
+            (keyword, keyword, keyword, keyword, limit),
         ).fetchall()
     finally:
         connection.close()
@@ -143,6 +154,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--collector", default=DEFAULT_COLLECTOR)
     parser.add_argument("--count", type=int, default=1000)
     parser.add_argument(
+        "--keyword",
+        default="",
+        help="Literal substring matched against title, description, or source keyword.",
+    )
+    parser.add_argument(
         "--minimum-detail-dwell",
         type=float,
         default=5.0,
@@ -194,14 +210,14 @@ def main() -> int:
         raise SystemExit(f"database not found: {args.database}")
 
     collector = args.collector.rstrip("/")
-    note_records = load_note_records(args.database, args.count)
+    note_records = load_note_records(args.database, args.count, args.keyword)
     if not note_records:
         raise SystemExit("no usable note_id rows in xhs_note")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     print(
         f"Starting controlled stability run: {len(note_records)} note IDs; "
-        f"collector={collector}; output={args.output}",
+        f"collector={collector}; keyword={args.keyword!r}; output={args.output}",
         flush=True,
     )
 
