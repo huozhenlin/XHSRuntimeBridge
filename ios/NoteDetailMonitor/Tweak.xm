@@ -1243,45 +1243,63 @@ static void NDMPopNavigation(void) {
         return;
     }
 
-    UIViewController *topController = keyWindow.rootViewController;
-    while (topController.presentedViewController) {
-        topController = topController.presentedViewController;
+    UIViewController *container = keyWindow.rootViewController;
+    while (container.presentedViewController) {
+        container = container.presentedViewController;
     }
 
     UINavigationController *nav = nil;
-    if ([topController isKindOfClass:UINavigationController.class]) {
-        nav = (UINavigationController *)topController;
+    UIViewController *visible = container;
+    if ([container isKindOfClass:UINavigationController.class]) {
+        nav = (UINavigationController *)container;
+        visible = nav.topViewController ?: container;
     } else {
-        nav = topController.navigationController;
+        nav = container.navigationController;
     }
 
-    if (!nav) {
+    NSUInteger count = nav.viewControllers.count;
+    NSString *currentController = NSStringFromClass(visible.class) ?: @"";
+
+    // A remote "back" command must never dismiss the app's root navigation
+    // stack. Only close a controller that is positively identified as a note
+    // detail page; every other state is a safe no-op.
+    if (!NDMLooksLikeDetailController(visible)) {
         NDMPostEvent(@{
             @"event": @"go_back_failed",
-            @"reason": @"no_navigation_controller"
+            @"stack_depth": @(count),
+            @"current_controller": currentController,
+            @"reason": @"note_detail_not_visible"
         });
         return;
     }
 
-    NSUInteger count = nav.viewControllers.count;
-    NSString *currentController = NSStringFromClass(topController.class) ?: @"";
-    BOOL popped = NO;
-    if (count > 1) {
+    if (container.presentingViewController) {
+        [container dismissViewControllerAnimated:YES completion:nil];
+        NDMPostEvent(@{
+            @"event": @"go_back_executed",
+            @"stack_depth": @(count),
+            @"current_controller": currentController,
+            @"mode": @"dismiss_detail_presentation"
+        });
+        return;
+    }
+
+    if (nav && count > 1 && nav.topViewController == visible) {
         [nav popViewControllerAnimated:YES];
-        popped = YES;
-    } else if (nav.presentingViewController) {
-        [nav dismissViewControllerAnimated:YES completion:nil];
-        popped = YES;
-    } else if (topController.presentingViewController) {
-        [topController dismissViewControllerAnimated:YES completion:nil];
-        popped = YES;
+        NDMPostEvent(@{
+            @"event": @"go_back_executed",
+            @"stack_depth": @(count),
+            @"current_controller": currentController,
+            @"mode": @"pop_detail_controller"
+        });
+        return;
     }
 
     NDMPostEvent(@{
-        @"event": popped ? @"go_back_executed" : @"go_back_failed",
+        @"event": @"go_back_failed",
         @"stack_depth": @(count),
         @"current_controller": currentController,
-        @"reason": popped ? @"" : @"nothing_to_pop"
+        @"reason": @"unsafe_root_or_unmatched_navigation_state"
     });
 }
 
