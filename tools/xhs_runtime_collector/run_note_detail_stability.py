@@ -78,8 +78,6 @@ def load_note_records(
                   AND (
                       ? = ''
                       OR INSTR(COALESCE(title, ''), ?) > 0
-                      OR INSTR(COALESCE(desc, ''), ?) > 0
-                      OR INSTR(COALESCE(source_keyword, ''), ?) > 0
                   )
                 GROUP BY note_id
             ) AS latest
@@ -87,7 +85,7 @@ def load_note_records(
             ORDER BY note.id DESC
             LIMIT ?
             """,
-            (keyword, keyword, keyword, keyword, limit),
+            (keyword, keyword, limit),
         ).fetchall()
     finally:
         connection.close()
@@ -156,7 +154,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--keyword",
         default="",
-        help="Literal substring matched against title, description, or source keyword.",
+        help="Literal substring matched against note titles only.",
     )
     parser.add_argument(
         "--minimum-detail-dwell",
