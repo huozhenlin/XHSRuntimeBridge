@@ -1301,6 +1301,20 @@ static void NDMExecuteCommand(NSDictionary *command) {
         return;
     }
 
+    // This strategy intentionally bypasses app-private routing and network
+    // APIs. It matches the working browser deep-link behavior directly.
+    if ([strategy isEqualToString:@"url_scheme"]) {
+        NDMPostEvent(@{
+            @"event": @"open_note_url_scheme_requested",
+            @"request_id": requestID ?: @"",
+            @"note_id": noteID
+        });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NDMOpenNoteViaURL(noteID, requestID);
+        });
+        return;
+    }
+
     if ([strategy isEqualToString:@"auto"] ||
         [strategy isEqualToString:@"xy_note_api"]) {
         if (NDMStartActiveNoteFetch(noteID, requestID)) return;
