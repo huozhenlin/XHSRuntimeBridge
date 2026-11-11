@@ -59,7 +59,7 @@ def load_note_records(
     database: Path,
     limit: int,
     keyword: str = "",
-) -> list[tuple[str, str, str]]:
+) -> list[tuple[str, str, str, str]]:
     keyword = keyword.strip()
     connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
     try:
@@ -68,7 +68,8 @@ def load_note_records(
             SELECT
                 note.note_id,
                 LOWER(COALESCE(note.type, 'normal')),
-                COALESCE(note.title, '')
+                COALESCE(note.title, ''),
+                COALESCE(note.source_keyword, '')
             FROM xhs_note AS note
             INNER JOIN (
                 SELECT note_id, MAX(id) AS latest_id
@@ -94,8 +95,9 @@ def load_note_records(
             str(note_id).strip(),
             note_type if note_type in ("normal", "video") else "normal",
             str(title or "").strip(),
+            str(source_keyword or "").strip(),
         )
-        for note_id, note_type, title in rows
+        for note_id, note_type, title, source_keyword in rows
         if str(note_id).strip()
     ]
 
@@ -219,13 +221,17 @@ def main() -> int:
         flush=True,
     )
 
-    for sequence, (note_id, note_type, title) in enumerate(note_records, start=1):
+    for sequence, (note_id, note_type, title, source_keyword) in enumerate(
+        note_records,
+        start=1,
+    ):
         open_sent_ms = int(time.time() * 1000)
         record: dict[str, Any] = {
             "sequence": sequence,
             "note_id": note_id,
             "note_type": note_type,
             "title": title,
+            "source_keyword": source_keyword,
             "started_at": utc_now(),
             "open_status": "not_sent",
             "back_status": "not_sent",
@@ -274,6 +280,7 @@ def main() -> int:
             append_record(args.output, record)
             print(
                 f"[{sequence}/{len(note_records)}] {note_id} ({note_type}) "
+                f"source_keyword={source_keyword[:100]!r} "
                 f"title={title.replace(chr(10), ' ').replace(chr(13), ' ')[:160]!r} "
                 f"open={record['open_status']} back={record['back_status']}",
                 flush=True,
