@@ -15,6 +15,7 @@ import argparse
 import json
 import random
 import sqlite3
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,17 +55,25 @@ def request_json(
     return parsed
 
 
-def load_note_records(database: Path, limit: int) -> list[tuple[str, str]]:
+def load_note_records(database: Path, limit: int) -> list[tuple[str, str, str]]:
     connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
     try:
         rows = connection.execute(
             """
-            SELECT note_id, LOWER(COALESCE(type, 'normal'))
-            FROM xhs_note
-            WHERE note_id IS NOT NULL
-              AND TRIM(note_id) <> ''
-            GROUP BY note_id, type
-            ORDER BY MAX(id) DESC
+            SELECT
+                note.note_id,
+                LOWER(COALESCE(note.type, 'normal')),
+                COALESCE(note.title, '')
+            FROM xhs_note AS note
+            INNER JOIN (
+                SELECT note_id, MAX(id) AS latest_id
+                FROM xhs_note
+                WHERE note_id IS NOT NULL
+                  AND TRIM(note_id) <> ''
+                GROUP BY note_id
+            ) AS latest
+                ON latest.latest_id = note.id
+            ORDER BY note.id DESC
             LIMIT ?
             """,
             (limit,),
@@ -72,8 +81,12 @@ def load_note_records(database: Path, limit: int) -> list[tuple[str, str]]:
     finally:
         connection.close()
     return [
-        (str(note_id).strip(), note_type if note_type in ("normal", "video") else "normal")
-        for note_id, note_type in rows
+        (
+            str(note_id).strip(),
+            note_type if note_type in ("normal", "video") else "normal",
+            str(title or "").strip(),
+        )
+        for note_id, note_type, title in rows
         if str(note_id).strip()
     ]
 
@@ -166,6 +179,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
     args = parse_args()
     if args.count <= 0:
         raise SystemExit("--count must be positive")
@@ -190,12 +205,13 @@ def main() -> int:
         flush=True,
     )
 
-    for sequence, (note_id, note_type) in enumerate(note_records, start=1):
+    for sequence, (note_id, note_type, title) in enumerate(note_records, start=1):
         open_sent_ms = int(time.time() * 1000)
         record: dict[str, Any] = {
             "sequence": sequence,
             "note_id": note_id,
             "note_type": note_type,
+            "title": title,
             "started_at": utc_now(),
             "open_status": "not_sent",
             "back_status": "not_sent",
@@ -244,6 +260,7 @@ def main() -> int:
             append_record(args.output, record)
             print(
                 f"[{sequence}/{len(note_records)}] {note_id} ({note_type}) "
+                f"title={title.replace(chr(10), ' ').replace(chr(13), ' ')[:160]!r} "
                 f"open={record['open_status']} back={record['back_status']}",
                 flush=True,
             )
