@@ -122,7 +122,11 @@ def detail_opened(
     for event in reversed(events):
         if not isinstance(event, dict):
             continue
-        if event.get("event") not in ("note_detail_open", "note_route_observed"):
+        if event.get("event") not in (
+            "note_detail_open",
+            "note_route_observed",
+            "xhs_deeplink_opened",
+        ):
             continue
         if str(event.get("note_id", "")) != note_id:
             continue
