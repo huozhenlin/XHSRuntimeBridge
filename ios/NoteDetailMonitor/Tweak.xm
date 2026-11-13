@@ -53,6 +53,57 @@ static NSString *NDMShortString(id value) {
     return text;
 }
 
+static NSDictionary *NDMURLSummary(id value) {
+    NSURL *url = nil;
+    if ([value isKindOfClass:NSURL.class]) {
+        url = value;
+    } else if ([value isKindOfClass:NSString.class]) {
+        url = [NSURL URLWithString:value];
+    }
+    if (!url) {
+        return @{
+            @"argument_class": value
+                ? NSStringFromClass(object_getClass(value)) ?: @""
+                : @"<nil>"
+        };
+    }
+
+    NSURLComponents *components = [
+        NSURLComponents componentsWithURL:url
+        resolvingAgainstBaseURL:NO
+    ];
+    NSMutableArray<NSString *> *queryNames = [NSMutableArray array];
+    for (NSURLQueryItem *item in components.queryItems ?: @[]) {
+        if (item.name.length > 0 && ![queryNames containsObject:item.name]) {
+            [queryNames addObject:item.name];
+        }
+    }
+    return @{
+        @"scheme": url.scheme ?: @"",
+        @"host": url.host ?: @"",
+        @"path": url.path ?: @"",
+        @"query_names": queryNames,
+        @"argument_class": NSStringFromClass(object_getClass(value)) ?: @""
+    };
+}
+
+static void NDMLogRouteEntry(
+    NSString *selector,
+    id url,
+    id source,
+    BOOL isCold
+) {
+    NDMPostEvent(@{
+        @"event": @"deeplink_route_entry",
+        @"selector": selector ?: @"",
+        @"url": NDMURLSummary(url),
+        @"source_class": source
+            ? NSStringFromClass(object_getClass(source)) ?: @""
+            : @"<nil>",
+        @"is_cold": @(isCold)
+    });
+}
+
 static id NDMJSONSafe(id value) {
     if (!value) return [NSNull null];
     if ([value isKindOfClass:NSString.class] ||
@@ -1487,6 +1538,76 @@ static void NDMStartCommandPoll(void) {
     );
 }
 
+%group DeepLinkRouteObservation
+
+%hook XYAppDelegateURLRouteHandler
+
+- (BOOL)handleUrl:(id)url
+        andSource:(id)source
+           isCold:(BOOL)isCold {
+    NDMLogRouteEntry(
+        @"handleUrl:andSource:isCold:",
+        url,
+        source,
+        isCold
+    );
+    BOOL result = %orig;
+    NDMPostEvent(@{
+        @"event": @"deeplink_route_result",
+        @"selector": @"handleUrl:andSource:isCold:",
+        @"result": @(result)
+    });
+    return result;
+}
+
+- (BOOL)handleRouteURLIfNeeded:(id)url
+                        source:(id)source
+                        isCold:(BOOL)isCold {
+    NDMLogRouteEntry(
+        @"handleRouteURLIfNeeded:source:isCold:",
+        url,
+        source,
+        isCold
+    );
+    BOOL result = %orig;
+    NDMPostEvent(@{
+        @"event": @"deeplink_route_result",
+        @"selector": @"handleRouteURLIfNeeded:source:isCold:",
+        @"result": @(result)
+    });
+    return result;
+}
+
+- (BOOL)handleURLRouteWithActivity:(id)activity {
+    NDMPostEvent(@{
+        @"event": @"deeplink_route_entry",
+        @"selector": @"handleURLRouteWithActivity:",
+        @"activity_class": activity
+            ? NSStringFromClass(object_getClass(activity)) ?: @""
+            : @"<nil>"
+    });
+    BOOL result = %orig;
+    NDMPostEvent(@{
+        @"event": @"deeplink_route_result",
+        @"selector": @"handleURLRouteWithActivity:",
+        @"result": @(result)
+    });
+    return result;
+}
+
+- (void)checkingLoginStatusToRouteUrlWith:(id)value {
+    NDMPostEvent(@{
+        @"event": @"deeplink_login_check",
+        @"selector": @"checkingLoginStatusToRouteUrlWith:",
+        @"argument": NDMURLSummary(value)
+    });
+    %orig;
+}
+
+%end
+
+%end
+
 %group NoteDetailNavigation
 
 %hook UINavigationController
@@ -1525,6 +1646,7 @@ static void NDMStartCommandPoll(void) {
             @"event": @"note_detail_monitor_loaded"
         });
         %init(NoteDetailNavigation);
+        %init(DeepLinkRouteObservation);
         NSLog(@"[NoteDetailMonitor] loaded");
         dispatch_async(dispatch_get_main_queue(), ^{
             NDMInstallRouteHook();
